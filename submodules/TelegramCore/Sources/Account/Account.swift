@@ -344,13 +344,7 @@ public func accountWithId(accountManager: AccountManager<TelegramAccountManagerT
                             }
                         }
                         
-                        #if DEBUG
-                        let initialDatacenterId: Int = 1
-                        #else
-                        let initialDatacenterId: Int = 2
-                        #endif
-                        
-                        return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: initialDatacenterId, keychain: keychain, basePath: path, testingEnvironment: beginWithTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: useRequestTimeoutTimers, appConfiguration: appConfig)
+                        return initializedNetwork(accountId: id, arguments: networkArguments, supplementary: supplementary, datacenterId: CustomDCConfig.initialDatacenterId, keychain: keychain, basePath: path, testingEnvironment: beginWithTestingEnvironment, languageCode: localizationSettings?.primaryComponent.languageCode, proxySettings: proxySettings, networkSettings: networkSettings, phoneNumber: nil, useRequestTimeoutTimers: useRequestTimeoutTimers, appConfiguration: appConfig)
                         |> map { network -> AccountResult in
                             return .unauthorized(UnauthorizedAccount(accountManager: accountManager, networkArguments: networkArguments, id: id, rootPath: rootPath, basePath: path, testingEnvironment: beginWithTestingEnvironment, postbox: postbox, network: network, shouldKeepAutoConnection: shouldKeepAutoConnection))
                         }

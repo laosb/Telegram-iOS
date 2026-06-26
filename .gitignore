@@ -84,3 +84,7 @@ xcode-files
 **/node_modules/
 tools/sim-watcher/dist/
 .mcp.json
+build-system/blah-codesigning
+build-system/blah-appstore-configuration.json
+build-system/blah-server.config.json
+submodules/TelegramCore/Sources/Network/CustomDCConfigGenerated.swift

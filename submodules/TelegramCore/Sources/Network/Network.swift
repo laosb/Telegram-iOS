@@ -548,6 +548,8 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
                 context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: ips.map { MTDatacenterAddress(ip: $0, port: 443, preferForMedia: false, restrictToTcp: false, cdn: false, preferForProxy: false, secret: nil) }))
             }
             
+            CustomDCConfig.shared?.apply(to: context)
+            
             context.keychain = keychain
             var wrappedAdditionalSource: MTSignal?
             #if os(iOS)
