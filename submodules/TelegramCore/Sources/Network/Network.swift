@@ -544,11 +544,13 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
                 ]
             }
             
-            for (id, ips) in seedAddressList {
-                context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: ips.map { MTDatacenterAddress(ip: $0, port: 443, preferForMedia: false, restrictToTcp: false, cdn: false, preferForProxy: false, secret: nil) }))
+            if let customConfig = CustomDCConfig.shared {
+                customConfig.apply(to: context)
+            } else {
+                for (id, ips) in seedAddressList {
+                    context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: ips.map { MTDatacenterAddress(ip: $0, port: 443, preferForMedia: false, restrictToTcp: false, cdn: false, preferForProxy: false, secret: nil) }))
+                }
             }
-            
-            CustomDCConfig.shared?.apply(to: context)
             
             context.keychain = keychain
             var wrappedAdditionalSource: MTSignal?
