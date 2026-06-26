@@ -7,6 +7,8 @@ import plistlib
 
 from BuildEnvironment import run_executable_with_output, check_run_system
 from DecryptMatch import decrypt_match_data
+from CustomDCConfigBuild import generate_custom_dc_config_swift
+
 
 class BuildConfiguration:
     def __init__(self,
@@ -84,7 +86,8 @@ def build_configuration_from_json(path):
         for key in required_keys:
             if key not in configuration_dict:
                 print('Configuration at {} does not contain {}'.format(path, key))
-        return BuildConfiguration(
+
+        result = BuildConfiguration(
             bundle_id=configuration_dict['bundle_id'],
             api_id=configuration_dict['api_id'],
             api_hash=configuration_dict['api_hash'],
@@ -98,6 +101,14 @@ def build_configuration_from_json(path):
             enable_siri=configuration_dict['enable_siri'],
             enable_icloud=configuration_dict['enable_icloud']
         )
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+    output_swift_path = os.path.join(
+        repo_root,
+        'submodules/TelegramCore/Sources/Network/CustomDCConfigGenerated.swift'
+    )
+    generate_custom_dc_config_swift(path, output_swift_path)
+    return result
 
 
 def decrypt_codesigning_directory_recursively(source_base_path, destination_base_path, password):
