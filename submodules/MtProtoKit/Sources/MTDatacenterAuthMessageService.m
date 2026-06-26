@@ -178,7 +178,12 @@ typedef enum {
             _stage = MTDatacenterAuthStagePQ;
         }
     } else {
-        _publicKeys = defaultPublicKeys(!mtProto.context.isTestingEnvironment);
+        NSArray<NSDictionary *> *contextKeys = [mtProto.context publicKeysForDatacenterWithId:mtProto.datacenterId];
+        if (contextKeys.count > 0) {
+            _publicKeys = [self convertPublicKeysFromDictionaries:contextKeys];
+        } else {
+            _publicKeys = defaultPublicKeys(!mtProto.context.isTestingEnvironment);
+        }
         _stage = MTDatacenterAuthStagePQ;
     }
     
