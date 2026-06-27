@@ -8,3 +8,10 @@ submodules/rlottie/rlottie/* linguist-vendored
 submodules/sqlcipher/* linguist-vendored
 submodules/Stripe/* linguist-vendored
 third-party/* linguist-vendored
+
+# Domain substitution filter: stored as "t.me", working tree shows "blah.ing".
+# Run scripts/setup-domain-filter.sh once per clone to activate.
+submodules/**/*.swift filter=telegram-domain
+Telegram/**/*.swift filter=telegram-domain
+# Files excluded from the filter (contain intentional domain-aware logic):
+# submodules/TelegramCore/Sources/TelegramLinkHost.swift !filter
