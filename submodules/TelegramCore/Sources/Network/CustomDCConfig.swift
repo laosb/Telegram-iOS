@@ -39,7 +39,11 @@ public struct CustomDCConfig {
     }
 
     /// Overrides seed addresses and pre-loads RSA public keys for each custom DC.
+    /// Also wipes any keychain-persisted addresses for standard Telegram DC IDs we don't use,
+    /// so stale data from previous runs can't cause unwanted connections.
     public func apply(to context: MTContext) {
+        NSLog("[blah] CustomDCConfig: applying config — defaultDcId=%d dcs=%d", defaultDcId, dcs.count)
+        let configuredIds = Set(dcs.map { $0.id })
         for dc in dcs {
             let addresses = dc.endpoints.compactMap { endpoint -> MTDatacenterAddress? in
                 MTDatacenterAddress(
@@ -59,6 +63,12 @@ public struct CustomDCConfig {
                 )
             }
             context.updatePublicKeysForDatacenter(withId: dc.id, publicKeys: [["key": dc.rsaPublicKeyPem]])
+            NSLog("[blah] CustomDCConfig: DC %d — %d endpoints, RSA key registered", dc.id, addresses.count)
+        }
+        // Clear any cached addresses in the persistent keychain for Telegram production DC IDs
+        // that we don't configure.
+        for dcId in 1...5 where !configuredIds.contains(dcId) {
+            context.updateAddressSetForDatacenter(withId: dcId, addressSet: MTDatacenterAddressSet(addressList: []), forceUpdateSchemes: false)
         }
     }
 }

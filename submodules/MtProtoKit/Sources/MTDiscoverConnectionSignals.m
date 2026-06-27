@@ -197,7 +197,9 @@
             }];
             [bestTcp4Signals addObject:signal];
             
-            NSArray *alternatePorts = @[@80, @5222];
+            // Alternate-port probing (80, 5222) only makes sense for standard Telegram
+            // addresses on port 443.
+            NSArray *alternatePorts = address.port == 443 ? @[@80, @5222] : @[];
             for (NSNumber *nPort in alternatePorts) {
                 NSSet *ipsWithPort = tcpIpsByPort[nPort];
                 if (![ipsWithPort containsObject:address.ip]) {
