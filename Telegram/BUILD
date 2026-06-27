@@ -262,7 +262,10 @@ filegroup(
     name = "AppResources",
     srcs = glob([
         "Telegram-iOS/Resources/**/*",
-    ], exclude = ["Telegram-iOS/Resources/**/.*"]),
+    ], exclude = [
+        "Telegram-iOS/Resources/**/.*",
+        "Telegram-iOS/Resources/intro/**",
+    ]),
 )
 
 filegroup(
