@@ -300,20 +300,7 @@ filegroup(
     ]),
 )
 
-alternate_icon_folders = [
-    "BlackIcon",
-    "BlackClassicIcon",
-    "BlackFilledIcon",
-    "BlueIcon",
-    "BlueClassicIcon",
-    "BlueFilledIcon",
-    "WhiteFilledIcon",
-    "New1",
-    "New2",
-    "Premium",
-    "PremiumBlack",
-    "PremiumTurbo",
-]
+alternate_icon_folders = []
 
 composer_icon_folders = ["Telegram"]
 
@@ -451,6 +438,10 @@ official_bundle_ids = [
     "org.telegram.Telegram-iOS",
 ]
 
+blah_bundle_ids = [
+    "ing.blah.TBlah"
+]
+
 store_bundle_ids = [
     "ph.telegra.Telegraph",
 ]
@@ -498,7 +489,13 @@ icloud_fragment = "" if not telegram_enable_icloud else """
     telegram_icloud_environment="Production" if telegram_aps_environment == "production" else "Development"
 )
 
-associated_domains_fragment = "" if telegram_bundle_id not in official_bundle_ids else """
+associated_domains_fragment = """
+<key>com.apple.developer.associated-domains</key>
+<array>
+    <string>applinks:blah.ing</string>
+    <string>webcredentials:blah.ing</string>
+</array>
+""" if telegram_bundle_id in blah_bundle_ids else ("" if telegram_bundle_id not in official_bundle_ids else """
 <key>com.apple.developer.associated-domains</key>
 <array>
     <string>applinks:telegram.me</string>
@@ -507,7 +504,7 @@ associated_domains_fragment = "" if telegram_bundle_id not in official_bundle_id
     <string>webcredentials:t.me</string>
     <string>webcredentials:telegram.org</string>
 </array>
-"""
+""")
 
 siri_fragment = "" if not telegram_enable_siri else """
 <key>com.apple.developer.siri</key>
@@ -535,7 +532,7 @@ official_communication_notifications_fragment = """
 <key>com.apple.developer.usernotifications.communication</key>
 <true/>
 """
-communication_notifications_fragment = official_communication_notifications_fragment if telegram_bundle_id in official_bundle_ids else ""
+communication_notifications_fragment = official_communication_notifications_fragment if telegram_bundle_id in official_bundle_ids or telegram_bundle_id in blah_bundle_ids else ""
 
 official_notification_filtering_fragment = """
 <key>com.apple.developer.usernotifications.filtering</key>
