@@ -3,12 +3,9 @@ import UIKit
 import Display
 import AsyncDisplayKit
 import TelegramCore
-import SSignalKit
 import SwiftSignalKit
 import TelegramPresentationData
-import LegacyComponents
 import SolidRoundedButtonNode
-import RMIntro
 
 public final class AuthorizationSequenceSplashController: ViewController {
     private var controllerNode: AuthorizationSequenceSplashControllerNode {
@@ -18,8 +15,6 @@ public final class AuthorizationSequenceSplashController: ViewController {
     private let accountManager: AccountManager<TelegramAccountManagerTypes>
     private let account: UnauthorizedAccount
     private let theme: PresentationTheme
-    
-    private let controller: RMIntroViewController
     
     private var validLayout: ContainerViewLayout?
     
@@ -35,44 +30,9 @@ public final class AuthorizationSequenceSplashController: ViewController {
         self.account = account
         self.theme = theme
         
-        self.suggestedLocalization.set(.single(nil)
-        |> then(TelegramEngineUnauthorized(account: self.account).localization.currentlySuggestedLocalization(extractKeys: ["Login.ContinueWithLocalization"])))
-        let suggestedLocalization = self.suggestedLocalization
-        
-        let localizationSignal = SSignal(generator: { subscriber in
-            let disposable = suggestedLocalization.get().start(next: { localization in
-                guard let localization = localization else {
-                    return
-                }
-                
-                var continueWithLanguageString: String = "Continue"
-                for entry in localization.extractedEntries {
-                    switch entry {
-                        case let .string(key, value):
-                            if key == "Login.ContinueWithLocalization" {
-                                continueWithLanguageString = value
-                            }
-                        default:
-                            break
-                    }
-                }
-                
-                if let available = localization.availableLocalizations.first, available.languageCode != "en" {
-                    let value = TGSuggestedLocalization(info: TGAvailableLocalization(title: available.title, localizedTitle: available.localizedTitle, code: available.languageCode), continueWithLanguageString: continueWithLanguageString, chooseLanguageString: "Choose Language", chooseLanguageOtherString: "Choose Language", englishLanguageNameString: "English")
-                    subscriber.putNext(value)
-                }
-            }, completed: {
-                subscriber.putCompletion()
-            })
-            
-            return SBlockDisposable(block: {
-                disposable.dispose()
-            })
-        })
-        
-        self.controller = RMIntroViewController(backgroundColor: theme.list.plainBackgroundColor, primaryColor: theme.list.itemPrimaryTextColor, buttonColor: theme.intro.startButtonColor, accentColor: theme.list.itemAccentColor, regularDotColor: theme.intro.dotColor, highlightedDotColor: theme.list.itemAccentColor, suggestedLocalizationSignal: localizationSignal)
-        
-        self.startButton = SolidRoundedButtonNode(title: "Start Messaging", theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 50.0 * 0.5, isShimmering: true)
+        self.suggestedLocalization.set(.single(nil))
+
+        self.startButton = SolidRoundedButtonNode(title: "Start Messaging", theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 50.0 * 0.5, isShimmering: false)
         self.startButton.accessibilityIdentifier = "Auth.Welcome.StartButton"
 
         super.init(navigationBarPresentationData: nil)
@@ -83,22 +43,8 @@ public final class AuthorizationSequenceSplashController: ViewController {
         
         self.statusBar.statusBarStyle = theme.intro.statusBarStyle.style
         
-        self.controller.startMessaging = { [weak self] in
-            self?.activateLocalization("en")
-        }
-        self.controller.startMessagingInAlternativeLanguage = { [weak self] code in
-            if let code = code {
-                self?.activateLocalization(code)
-            }
-        }
-        
         self.startButton.pressed = { [weak self] in
             self?.activateLocalization("en")
-        }
-        
-        self.controller.createStartButton = { [weak self] width in
-            let _ = self?.startButton.updateLayout(width: width, transition: .immediate)
-            return self?.startButton.view
         }
     }
     
@@ -116,7 +62,6 @@ public final class AuthorizationSequenceSplashController: ViewController {
     }
     
     func animateIn() {
-        self.controller.animateIn()
     }
     
     var buttonFrame: CGRect {
@@ -128,64 +73,18 @@ public final class AuthorizationSequenceSplashController: ViewController {
     }
     
     var animationSnapshot: UIView? {
-        return self.controller.createAnimationSnapshot()
+        return nil
     }
     
     var textSnaphot: UIView? {
-        return self.controller.createTextSnapshot()
+        return nil
     }
-    
-    private func addControllerIfNeeded() {
-        if !self.controller.isViewLoaded || self.controller.view.superview == nil {
-            self.displayNode.view.addSubview(self.controller.view)
-            if let layout = self.validLayout {
-                controller.view.frame = CGRect(origin: CGPoint(), size: layout.size)
-            }
-            self.controller.viewDidAppear(false)
-        }
-    }
-    
-    public override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        self.addControllerIfNeeded()
-        self.controller.viewWillAppear(false)
-    }
-    
-    public override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        
-        controller.viewDidAppear(animated)
-    }
-    
-    public override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        
-        controller.viewWillDisappear(animated)
-    }
-    
-    public override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        
-        controller.viewDidDisappear(animated)
-    }
-    
+
     public override func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
         
         self.validLayout = layout
-        let controllerFrame = CGRect(origin: CGPoint(), size: layout.size)
-        self.controller.defaultFrame = controllerFrame
-        
         self.controllerNode.containerLayoutUpdated(layout, navigationBarHeight: 0.0, transition: transition)
-        
-        self.addControllerIfNeeded()
-        if case .immediate = transition {
-            self.controller.view.frame = controllerFrame
-        } else {
-            UIView.animate(withDuration: 0.3, animations: {
-                self.controller.view.frame = controllerFrame
-            })
-        }
     }
     
     private func activateLocalization(_ code: String) {
@@ -217,7 +116,6 @@ public final class AuthorizationSequenceSplashController: ViewController {
                 return
             }
             
-            strongSelf.controller.isEnabled = false
             strongSelf.startButton.alpha = 0.6
             let accountManager = strongSelf.accountManager
             
@@ -238,7 +136,6 @@ public final class AuthorizationSequenceSplashController: ViewController {
                     return stringsValue
                 }
                 |> deliverOnMainQueue).start(next: { strings in
-                    self?.controller.isEnabled = true
                     self?.startButton.alpha = 1.0
                     self?.pressNext(strings: strings)
                 })
