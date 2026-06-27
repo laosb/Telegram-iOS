@@ -187,47 +187,32 @@ public class ComposeControllerImpl: ViewController, ComposeController {
         }
         
         self.contactsNode.openCreateContact = { [weak self] in
-            let _ = (DeviceAccess.authorizationStatus(subject: .contacts)
-            |> take(1)
-            |> deliverOnMainQueue).startStandalone(next: { status in
-                guard let strongSelf = self else {
-                    return
-                }
-                
-                switch status {
-                case .allowed:
-                    let controller = strongSelf.context.sharedContext.makeNewContactScreen(
-                        context: strongSelf.context,
-                        peer: nil,
-                        firstName: nil,
-                        lastName: nil,
-                        phoneNumber: nil,
-                        shareViaException: false,
-                        completion: { [weak self] peer, stableId, contactData in
-                            guard let strongSelf = self else {
-                                return
-                            }
-                            if let peer = peer {
-                                DispatchQueue.main.async {
-                                    if let navigationController = strongSelf.navigationController as? NavigationController {
-                                        strongSelf.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: strongSelf.context, chatLocation: .peer(peer)))
-                                    }
-                                }
-                            } else if let stableId, let contactData {
-                                (strongSelf.navigationController as? NavigationController)?.replaceAllButRootController(strongSelf.context.sharedContext.makeDeviceContactInfoController(context: ShareControllerAppAccountContext(context: strongSelf.context), environment: ShareControllerAppEnvironment(sharedContext: strongSelf.context.sharedContext), subject: .vcard(nil, stableId, contactData), completed: nil, cancelled: nil), animated: true)
+            guard let strongSelf = self else {
+                return
+            }
+            let controller = strongSelf.context.sharedContext.makeNewContactScreen(
+                context: strongSelf.context,
+                peer: nil,
+                firstName: nil,
+                lastName: nil,
+                phoneNumber: nil,
+                shareViaException: false,
+                completion: { [weak self] peer, stableId, contactData in
+                    guard let strongSelf = self else {
+                        return
+                    }
+                    if let peer = peer {
+                        DispatchQueue.main.async {
+                            if let navigationController = strongSelf.navigationController as? NavigationController {
+                                strongSelf.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: strongSelf.context, chatLocation: .peer(peer)))
                             }
                         }
-                    )
-                    (strongSelf.navigationController as? NavigationController)?.pushViewController(controller)
-                case .notDetermined:
-                    DeviceAccess.authorizeAccess(to: .contacts)
-                default:
-                    let presentationData = strongSelf.presentationData
-                    strongSelf.present(textAlertController(context: strongSelf.context, title: presentationData.strings.AccessDenied_Title, text: presentationData.strings.Contacts_AccessDeniedError, actions: [TextAlertAction(type: .genericAction, title: presentationData.strings.Common_NotNow, action: {}), TextAlertAction(type: .defaultAction, title: presentationData.strings.AccessDenied_Settings, action: {
-                        self?.context.sharedContext.applicationBindings.openSettings()
-                    })]), in: .window(.root))
+                    } else if let stableId, let contactData {
+                        (strongSelf.navigationController as? NavigationController)?.replaceAllButRootController(strongSelf.context.sharedContext.makeDeviceContactInfoController(context: ShareControllerAppAccountContext(context: strongSelf.context), environment: ShareControllerAppEnvironment(sharedContext: strongSelf.context.sharedContext), subject: .vcard(nil, stableId, contactData), completed: nil, cancelled: nil), animated: true)
+                    }
                 }
-            })
+            )
+            (strongSelf.navigationController as? NavigationController)?.pushViewController(controller)
         }
         
         self.contactsNode.openCreateNewChannel = { [weak self] in
