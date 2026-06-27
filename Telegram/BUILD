@@ -261,15 +261,15 @@ filegroup(
 filegroup(
     name = "AppIntentVocabularyResources",
     srcs = glob([
-        "Telegram-iOS/en.lproj/AppIntentVocabulary.plist",
-    ]),
+        "Telegram-iOS/*.lproj/AppIntentVocabulary.plist",
+    ], exclude = ["Telegram-iOS/*.lproj/**/.*"]),
 )
 
 filegroup(
     name = "InfoPlistStringResources",
-    srcs = [
-        "Telegram-iOS/en.lproj/InfoPlist.strings",
-    ],
+    srcs = glob([
+        "Telegram-iOS/*.lproj/InfoPlist.strings",
+    ], exclude = ["Telegram-iOS/*.lproj/**/.*"]),
 )
 
 filegroup(
@@ -1612,6 +1612,8 @@ plist_fragment(
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>We need this so that you can take and share photos and videos.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Telegram stores your contacts heavily encrypted in the cloud to let you connect with your friends across all your devices.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>You can use Face ID to unlock the app.</string>
     <key>NSLocationAlwaysUsageDescription</key>
