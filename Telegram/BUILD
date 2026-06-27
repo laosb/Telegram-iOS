@@ -1905,6 +1905,7 @@ apple_prebuilt_watchos_application(
 
 ios_application(
     name = "Telegram",
+    bundle_name = "TBlah",
     bundle_id = "{telegram_bundle_id}".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
