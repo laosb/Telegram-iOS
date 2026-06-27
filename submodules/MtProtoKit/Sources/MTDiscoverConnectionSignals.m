@@ -297,8 +297,7 @@
                 return [MTSignal complete];
             }];
             [bestTcp4Signals addObject:signal];
-
-            for (NSNumber *nPort in alternatePorts) {
+            for (NSNumber *nPort in (address.port == 443 ? alternatePorts : @[])) {
                 NSSet *ipsWithPort = tcpIpsByPort[nPort];
                 if (![ipsWithPort containsObject:address.ip]) {
                     MTDatacenterAddress *portAddress = [[MTDatacenterAddress alloc] initWithIp:address.ip port:[nPort intValue] preferForMedia:address.preferForMedia restrictToTcp:address.restrictToTcp cdn:address.cdn preferForProxy:address.preferForProxy secret:address.secret];
