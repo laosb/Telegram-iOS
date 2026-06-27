@@ -164,26 +164,7 @@ minimum_os_version = "13.0"
 
 notificationServiceExtensionVersion = "v1"
 
-empty_languages = [
-    "ar",
-    "be",
-    "ca",
-    "de",
-    "es",
-    "fa",
-    "fr",
-    "id",
-    "it",
-    "ko",
-    "ms",
-    "nl",
-    "pl",
-    "pt",
-    "ru",
-    "tr",
-    "uk",
-    "uz",
-]
+empty_languages = []
 
 [
     genrule(
@@ -280,15 +261,15 @@ filegroup(
 filegroup(
     name = "AppIntentVocabularyResources",
     srcs = glob([
-        "Telegram-iOS/*.lproj/AppIntentVocabulary.plist",
-    ], exclude = ["Telegram-iOS/*.lproj/**/.*"]),
+        "Telegram-iOS/en.lproj/AppIntentVocabulary.plist",
+    ]),
 )
 
 filegroup(
     name = "InfoPlistStringResources",
-    srcs = glob([
-        "Telegram-iOS/*.lproj/InfoPlist.strings",
-    ], exclude = ["Telegram-iOS/*.lproj/**/.*"]),
+    srcs = [
+        "Telegram-iOS/en.lproj/InfoPlist.strings",
+    ],
 )
 
 filegroup(
@@ -1631,8 +1612,6 @@ plist_fragment(
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>We need this so that you can take and share photos and videos.</string>
-    <key>NSContactsUsageDescription</key>
-    <string>Telegram stores your contacts heavily encrypted in the cloud to let you connect with your friends across all your devices.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>You can use Face ID to unlock the app.</string>
     <key>NSLocationAlwaysUsageDescription</key>
