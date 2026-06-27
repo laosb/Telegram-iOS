@@ -376,28 +376,12 @@ public class ContactsController: ViewController {
         }
         
         self.contactsNode.openInvite = { [weak self] in
-            let _ = (DeviceAccess.authorizationStatus(subject: .contacts)
-            |> take(1)
-            |> deliverOnMainQueue).start(next: { value in
-                guard let strongSelf = self else {
-                    return
-                }
-                switch value {
-                    case .allowed:
-                        (strongSelf.navigationController as? NavigationController)?.pushViewController(InviteContactsController(context: strongSelf.context), completion: {
-                            if let strongSelf = self {
-                                strongSelf.contactsNode.contactListNode.listNode.clearHighlightAnimated(true)
-                            }
-                        })
-                    case .notDetermined:
-                        DeviceAccess.authorizeAccess(to: .contacts)
-                        strongSelf.contactsNode.contactListNode.listNode.clearHighlightAnimated(true)
-                    default:
-                        let presentationData = strongSelf.presentationData
-                        strongSelf.present(textAlertController(context: strongSelf.context, title: presentationData.strings.AccessDenied_Title, text: presentationData.strings.Contacts_AccessDeniedError, actions: [TextAlertAction(type: .genericAction, title: presentationData.strings.Common_NotNow, action: {}), TextAlertAction(type: .defaultAction, title: presentationData.strings.AccessDenied_Settings, action: {
-                            self?.context.sharedContext.applicationBindings.openSettings()
-                        })]), in: .window(.root))
-                        strongSelf.contactsNode.contactListNode.listNode.clearHighlightAnimated(true)
+            guard let strongSelf = self else {
+                return
+            }
+            (strongSelf.navigationController as? NavigationController)?.pushViewController(InviteContactsController(context: strongSelf.context), completion: {
+                if let strongSelf = self {
+                    strongSelf.contactsNode.contactListNode.listNode.clearHighlightAnimated(true)
                 }
             })
         }
@@ -708,55 +692,35 @@ public class ContactsController: ViewController {
     }
     
     @objc func addPressed() {
-        let _ = (DeviceAccess.authorizationStatus(subject: .contacts)
-        |> take(1)
-        |> deliverOnMainQueue).start(next: { [weak self] status in
-            guard let strongSelf = self else {
-                return
-            }
-            
-            switch status {
-                case .allowed:
-                    if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController {
-                        let controller = strongSelf.context.sharedContext.makeNewContactScreen(
-                            context: strongSelf.context,
-                            peer: nil,
-                            firstName: nil,
-                            lastName: nil,
-                            phoneNumber: nil,
-                            shareViaException: false,
-                            completion: { [weak self] peer, stableId, contactData in
-                                guard let strongSelf = self else {
-                                    return
-                                }
-                                if let peer {
-                                    Queue.mainQueue().async {
-                                        if let infoController = strongSelf.context.sharedContext.makePeerInfoController(context: strongSelf.context, updatedPresentationData: nil, peer: peer, mode: .generic, avatarInitiallyExpanded: false, fromChat: false, requestsContext: nil) {
-                                            if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController {
-                                                navigationController.pushViewController(infoController)
-                                            }
-                                        }
-                                    }
-                                } else if let stableId, let contactData {
-                                    if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController {
-                                        navigationController.pushViewController(strongSelf.context.sharedContext.makeDeviceContactInfoController(context: ShareControllerAppAccountContext(context: strongSelf.context), environment: ShareControllerAppEnvironment(sharedContext: strongSelf.context.sharedContext), subject: .vcard(nil, stableId, contactData), completed: nil, cancelled: nil))
-                                    }
+        if let navigationController = self.context.sharedContext.mainWindow?.viewController as? NavigationController {
+            let controller = self.context.sharedContext.makeNewContactScreen(
+                context: self.context,
+                peer: nil,
+                firstName: nil,
+                lastName: nil,
+                phoneNumber: nil,
+                shareViaException: false,
+                completion: { [weak self] peer, stableId, contactData in
+                    guard let strongSelf = self else {
+                        return
+                    }
+                    if let peer {
+                        Queue.mainQueue().async {
+                            if let infoController = strongSelf.context.sharedContext.makePeerInfoController(context: strongSelf.context, updatedPresentationData: nil, peer: peer, mode: .generic, avatarInitiallyExpanded: false, fromChat: false, requestsContext: nil) {
+                                if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController {
+                                    navigationController.pushViewController(infoController)
                                 }
                             }
-                        )
-                        navigationController.pushViewController(controller)
+                        }
+                    } else if let stableId, let contactData {
+                        if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController {
+                            navigationController.pushViewController(strongSelf.context.sharedContext.makeDeviceContactInfoController(context: ShareControllerAppAccountContext(context: strongSelf.context), environment: ShareControllerAppEnvironment(sharedContext: strongSelf.context.sharedContext), subject: .vcard(nil, stableId, contactData), completed: nil, cancelled: nil))
+                        }
                     }
-                case .notDetermined:
-                    DeviceAccess.authorizeAccess(to: .contacts)
-                default:
-                    let presentationData = strongSelf.presentationData
-                    if let navigationController = strongSelf.context.sharedContext.mainWindow?.viewController as? NavigationController, let topController = navigationController.topViewController as? ViewController {
-                        topController.present(textAlertController(context: strongSelf.context, title: presentationData.strings.AccessDenied_Title, text: presentationData.strings.Contacts_AccessDeniedError, actions: [TextAlertAction(type: .genericAction, title: presentationData.strings.Common_NotNow, action: {}), TextAlertAction(type: .defaultAction, title: presentationData.strings.AccessDenied_Settings, action: {
-                            self?.context.sharedContext.applicationBindings.openSettings()
-                        })]), in: .window(.root))
-                    }
-            }
-        })
+                }
+            )
+            navigationController.pushViewController(controller)
+        }
     }
     
     override public func tabBarItemContextAction(sourceView: ContextExtractedContentContainingView, gesture: ContextGesture) {
