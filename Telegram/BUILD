@@ -493,6 +493,7 @@ associated_domains_fragment = """
 <key>com.apple.developer.associated-domains</key>
 <array>
     <string>applinks:blah.ing</string>
+    <string>applinks:*.blah.ing</string>
     <string>webcredentials:blah.ing</string>
 </array>
 """ if telegram_bundle_id in blah_bundle_ids else ("" if telegram_bundle_id not in official_bundle_ids else """

@@ -9,21 +9,11 @@ import TelegramNotices
 import AccountContext
 
 private let baseTelegramMePaths = [
-    "telegram.me",
-    "t.me", "telegram.dog"
+    "t.me"
 ]
 private let telegramWebShortLinkHosts = [
-    "a.t.me", 
-    "k.t.me",
-    "z.t.me"
 ]
 private let baseTelegraPhPaths = [
-    "telegra.ph/",
-    "te.legra.ph/",
-    "graph.org/",
-    "t.me/iv?",
-    "telegram.org/blog/",
-    "telegram.org/tour/"
 ]
 
 public func isTelegramWebShortLink(_ url: String) -> Bool {

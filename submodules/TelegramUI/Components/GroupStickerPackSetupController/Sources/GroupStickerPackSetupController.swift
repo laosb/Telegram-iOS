@@ -206,7 +206,7 @@ private enum GroupStickerPackEntry: ItemListNodeEntry {
                 return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: prefix, textColor: theme.list.itemPrimaryTextColor), text: value, placeholder: placeholder, type: .regular(capitalization: false, autocorrection: false), spacing: 0.0, clearType: .none, tag: nil, sectionId: self.section, textUpdated: { value in
                     arguments.updateSearchText(value)
                 }, processPaste: { text in
-                    if let url = (URL(string: text) ?? URL(string: "http://" + text)), url.host == "t.me" || url.host == "telegram.me" {
+                    if let url = (URL(string: text) ?? URL(string: "http://" + text)), url.host == "t.me" {
                         let prefix = isEmoji ? "/addemoji/" : "/addstickers/"
                         if url.path.hasPrefix(prefix) {
                             return String(url.path[url.path.index(url.path.startIndex, offsetBy: prefix.count)...])
