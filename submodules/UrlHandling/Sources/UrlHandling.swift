@@ -12,8 +12,10 @@ private let baseTelegramMePaths = [
     "t.me"
 ]
 private let telegramWebShortLinkHosts = [
+    "web.blah.ing"
 ]
 private let baseTelegraPhPaths = [
+    "just.pub"
 ]
 
 public func isTelegramWebShortLink(_ url: String) -> Bool {
