@@ -10,21 +10,13 @@ import AccountContext
 import WalletContext
 
 private let baseTelegramMePaths = [
-    "telegram.me",
-    "t.me", "telegram.dog"
+    "t.me"
 ]
 private let telegramWebShortLinkHosts = [
-    "a.t.me", 
-    "k.t.me",
-    "z.t.me"
+    "web.blah.ing"
 ]
 private let baseTelegraPhPaths = [
-    "telegra.ph/",
-    "te.legra.ph/",
-    "graph.org/",
-    "t.me/iv?",
-    "telegram.org/blog/",
-    "telegram.org/tour/"
+    "just.pub"
 ]
 
 public func isTelegramWebShortLink(_ url: String) -> Bool {
