@@ -17,8 +17,8 @@ fi
 
 DOMAIN="$(cat "$ROOT/.telegram-domain")"
 chmod +x "$ROOT/scripts/smudge-domain.sh" "$ROOT/scripts/clean-domain.sh"
-git config filter.telegram-domain.smudge "$ROOT/scripts/smudge-domain.sh"
-git config filter.telegram-domain.clean  "$ROOT/scripts/clean-domain.sh"
+git config filter.telegram-domain.smudge "scripts/smudge-domain.sh"
+git config filter.telegram-domain.clean  "scripts/clean-domain.sh"
 git config filter.telegram-domain.required true
 
 # Force smudge filter re-application: git checkout-index skips files whose
