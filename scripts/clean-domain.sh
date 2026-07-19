@@ -5,8 +5,5 @@ ROOT="$(git rev-parse --show-toplevel)"
 DOMAIN="$(cat "$ROOT/.telegram-domain")"
 # Escape dots in the domain for use as a sed regex pattern.
 ESCAPED="$(printf '%s\n' "$DOMAIN" | sed 's/\./\\./g')"
-exec sed \
-  -e "s|\"https://${ESCAPED}/|\"https://t.me/|g" \
-  -e "s|\"https://${ESCAPED}\\\\(|\"https://t.me\\\\(|g" \
-  -e "s|\"${ESCAPED}/|\"t.me/|g" \
-  -e "s|\"${ESCAPED}\"|\"t.me\"|g"
+exec sed -E \
+  -e "s#(\"|//)${ESCAPED}([/\"\\])#\\1t.me\\2#g"
