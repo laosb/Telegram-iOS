@@ -18,5 +18,10 @@ third-party/* linguist-vendored
 # Run scripts/setup-domain-filter.sh once per clone to activate.
 submodules/**/*.swift filter=telegram-domain
 Telegram/**/*.swift filter=telegram-domain
+Telegram/**/*.m filter=telegram-domain
+# Localized strings also carry the host unquoted mid-sentence ("Link: t.me/%@"),
+# which the source driver's quote/"//" anchoring skips, so they use the
+# unanchored driver.
+Telegram/**/*.strings filter=telegram-domain-strings
 # Files excluded from the filter (contain intentional domain-aware logic):
 # submodules/TelegramCore/Sources/TelegramLinkHost.swift !filter
