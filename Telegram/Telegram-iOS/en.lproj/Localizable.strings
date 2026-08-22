@@ -9218,7 +9218,7 @@ Sorry for the inconvenience.";
 "PeerInfo.Bot.EditIntro" = "Edit Intro";
 "PeerInfo.Bot.EditCommands" = "Edit Commands";
 "PeerInfo.Bot.ChangeSettings" = "Change Bot Settings";
-"PeerInfo.Bot.BotFatherInfo" = "Use [@BotFather]() to manage this bot.";
+"PeerInfo.Bot.BotFatherInfo" = "Use [@bot]() to manage this bot.";
 
 "WallpaperPreview.NotAppliedInfo" = "**%@** will be able to apply this wallpaper";
 "WallpaperPreview.ChatTopText" = "Apply the wallpaper in this chat.";
