@@ -1,4 +1,5 @@
 #import <LegacyComponents/TGLocalization.h>
+#import <BlahBranding/BlahBranding.h>
 
 #import <LegacyComponents/TGPluralization.h>
 
@@ -132,9 +133,9 @@ static NSString *fallbackString(NSString *key, NSString *code) {
     NSString *value = _dict[key];
 
     if (value != nil && value.length != 0) {
-        return value;
+        return BlahBrandedString(value);
     } else {
-        return fallbackString(key, _code);
+        return BlahBrandedString(fallbackString(key, _code));
     }
 }
 

@@ -35,6 +35,7 @@ objc_library(
         "PublicHeaders",
     ],
     deps = [
+        "//submodules/BlahBranding:BlahBranding",
         "//submodules/SSignalKit/SSignalKit:SSignalKit",
         "//submodules/AppBundle:AppBundle",
     ],

@@ -39,7 +39,8 @@ load("//Telegram:prebuilt_watchos.bzl",
     "apple_prebuilt_watchos_application",
 )
 
-load("//build-system/bazel-utils:plist_fragment.bzl",
+load("//build-system/BlahBranding:branding.bzl",
+    "blah_resources",
     "plist_fragment",
 )
 
@@ -191,6 +192,7 @@ objc_library(
         "Foundation",
     ],
     deps = [
+        "//submodules/BlahBranding:BlahBranding",
         "//submodules/NumberPluralizationForm:NumberPluralizationForm",
         "//submodules/AppBundle:AppBundle",
     ],
@@ -249,7 +251,7 @@ filegroup(
     ]),
 )
 
-filegroup(
+blah_resources(
     name = "AppStringResources",
     srcs = [
         "Telegram-iOS/en.lproj/Localizable.strings",
@@ -265,7 +267,7 @@ filegroup(
     ], exclude = ["Telegram-iOS/*.lproj/**/.*"]),
 )
 
-filegroup(
+blah_resources(
     name = "InfoPlistStringResources",
     srcs = glob([
         "Telegram-iOS/*.lproj/InfoPlist.strings",

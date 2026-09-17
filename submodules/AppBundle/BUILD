@@ -13,6 +13,7 @@ objc_library(
     includes = [
        "PublicHeaders", 
     ],
+    deps = ["//submodules/BlahBranding:BlahBranding"],
     sdk_frameworks = [
         "Foundation",
         "UIKit",
