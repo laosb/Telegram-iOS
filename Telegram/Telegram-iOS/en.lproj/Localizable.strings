@@ -16598,3 +16598,8 @@ Error: %8$@";
 "TextProcessing.ActionGenerate" = "Generate";
 "TextProcessing.StyleList.Prompt" = "Prompt";
 "TextProcessing.PromptPlaceholder" = "Generate text, formulas, or tables...";
+
+"blah.Login.Title" = "Welcome to Blah";
+"blah.Login.Subtitle" = "Continue with your email or Blah number";
+"blah.Login.Placeholder" = "Email or Blah number";
+"blah.Login.Continue" = "Continue";

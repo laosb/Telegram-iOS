@@ -303,7 +303,7 @@ private final class ContactSyncNode: ASDisplayNode {
     }
 }
 
-final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode {
+final class AuthorizationSequencePhoneEntryControllerNode: ASDisplayNode, AuthorizationPhoneEntryNode {
     private let sharedContext: SharedAccountContext
     private var account: UnauthorizedAccount?
     private let strings: PresentationStrings
