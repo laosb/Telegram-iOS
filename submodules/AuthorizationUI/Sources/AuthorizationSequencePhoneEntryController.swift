@@ -15,8 +15,8 @@ import MessageUI
 import AuthenticationServices
 
 public final class AuthorizationSequencePhoneEntryController: ViewController, MFMailComposeViewControllerDelegate, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
-    private var controllerNode: AuthorizationSequencePhoneEntryControllerNode {
-        return self.displayNode as! AuthorizationSequencePhoneEntryControllerNode
+    private var controllerNode: ASDisplayNode & AuthorizationPhoneEntryNode {
+        return self.displayNode as! (ASDisplayNode & AuthorizationPhoneEntryNode)
     }
     
     private var validLayout: ContainerViewLayout?
@@ -143,13 +143,18 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     }
     
     override public func loadDisplayNode() {
-        self.displayNode = AuthorizationSequencePhoneEntryControllerNode(sharedContext: self.sharedContext, account: self.account, strings: self.presentationData.strings, theme: self.presentationData.theme, debugAction: { [weak self] in
+        let debugAction: () -> Void = { [weak self] in
             guard let strongSelf = self else {
                 return
             }
             strongSelf.view.endEditing(true)
             self?.present(debugController(sharedContext: strongSelf.sharedContext, context: nil, modal: true), in: .window(.root), with: ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
-        }, hasOtherAccounts: self.otherAccountPhoneNumbers.0 != nil)
+        }
+        if self.account != nil {
+            self.displayNode = BlahAuthorizationEntryNode(strings: self.presentationData.strings, theme: self.presentationData.theme, debugAction: debugAction)
+        } else {
+            self.displayNode = AuthorizationSequencePhoneEntryControllerNode(sharedContext: self.sharedContext, account: self.account, strings: self.presentationData.strings, theme: self.presentationData.theme, debugAction: debugAction, hasOtherAccounts: self.otherAccountPhoneNumbers.0 != nil)
+        }
         self.controllerNode.accountUpdated = { [weak self] account in
             guard let strongSelf = self else {
                 return
@@ -382,12 +387,13 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     }
     
     @objc func nextPressed() {
-        guard self.confirmationController == nil else {
+        guard !self.inProgress, self.confirmationController == nil else {
             return
         }
         let (_, _, number) = self.controllerNode.codeAndNumber
         if !number.isEmpty {
-            let logInNumber = cleanPhoneNumber(self.controllerNode.currentNumber, removePlus: true)
+            let identifier = self.controllerNode.currentNumber
+            let logInNumber = identifier.contains("@") ? identifier : cleanPhoneNumber(identifier, removePlus: true)
             var existing: (String, AccountRecordId)?
             for (number, id, isTestingEnvironment) in self.otherAccountPhoneNumbers.1 {
                 if isTestingEnvironment == self.isTestingEnvironment && cleanPhoneNumber(number, removePlus: true) == logInNumber {
@@ -406,7 +412,9 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
                 actions.append(TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Common_OK, action: {}))
                 self.present(textAlertController(sharedContext: self.sharedContext, title: nil, text: self.presentationData.strings.Login_PhoneNumberAlreadyAuthorized, actions: actions), in: .window(.root))
             } else {
-                if let validLayout = self.validLayout, validLayout.size.width > 320.0 {
+                if self.controllerNode is BlahAuthorizationEntryNode {
+                    self.loginWithNumber?(identifier, false)
+                } else if let validLayout = self.validLayout, validLayout.size.width > 320.0 {
                     let (code, formattedNumber) = self.controllerNode.formattedCodeAndNumber
 
                     let confirmationController = PhoneConfirmationController(theme: self.presentationData.theme, strings: self.presentationData.strings, code: code, number: formattedNumber, sourceController: self)
