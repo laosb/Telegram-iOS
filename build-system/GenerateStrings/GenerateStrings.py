@@ -309,6 +309,7 @@ static _FormattedString * _Nonnull getFormatted{num_arguments}(_PresentationStri
 #import <PresentationStrings/PresentationStrings.h>
 #import <NumberPluralizationForm/NumberPluralizationForm.h>
 #import <AppBundle/AppBundle.h>
+#import <BlahBranding/BlahBranding.h>
 
 @implementation _FormattedStringRange
 
@@ -484,7 +485,7 @@ static NSString * _Nonnull getSingle(_PresentationStrings * _Nullable strings, N
             *isFound = true;
         }
     }
-    return result;
+    return BlahBrandedString(result);
 }
 
 static NSString * _Nonnull getSingleIndirect(_PresentationStrings * _Nonnull strings, uint32_t keyId) {

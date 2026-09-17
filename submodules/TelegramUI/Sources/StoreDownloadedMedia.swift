@@ -9,7 +9,7 @@ import AccountContext
 private func appSpecificAssetCollection() -> Signal<PHAssetCollection, NoError> {
     return Signal { subscriber in
         let fetchOption = PHFetchOptions()
-        let albumName = "Telegram"
+        let albumName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Blah"
         fetchOption.predicate = NSPredicate(format: "title == '" + albumName + "'")
         
         let fetchResult = PHAssetCollection.fetchAssetCollections(

@@ -1,4 +1,5 @@
 #import <AppBundle/AppBundle.h>
+#import <BlahBranding/BlahBranding.h>
 
 NSBundle * _Nonnull getAppBundle() {
     static NSBundle *appBundle = nil;
@@ -21,7 +22,7 @@ NSBundle * _Nonnull getAppBundle() {
 @implementation UIImage (AppBundle)
 
 - (instancetype _Nullable)initWithBundleImageName:(NSString * _Nonnull)bundleImageName {
-    return [UIImage imageNamed:bundleImageName inBundle:getAppBundle() compatibleWithTraitCollection:nil];
+    return [UIImage imageNamed:BlahBrandedImageName(bundleImageName) inBundle:getAppBundle() compatibleWithTraitCollection:nil];
 }
 
 @end
