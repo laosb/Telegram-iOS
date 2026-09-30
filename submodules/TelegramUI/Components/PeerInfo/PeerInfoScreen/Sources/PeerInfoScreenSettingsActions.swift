@@ -1,3 +1,4 @@
+import BlahIdentityUI
 import Foundation
 import UIKit
 import Display
@@ -83,6 +84,8 @@ extension PeerInfoScreenNode {
             })
         case .recentCalls:
             push(CallListController(context: context, mode: .navigation))
+        case .blahIdentity:
+            push(blahIdentityController(network: self.context.account.network, presentationData: self.presentationData))
         case .devices:
             let _ = (self.activeSessionsContextAndCount.get()
             |> take(1)

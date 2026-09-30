@@ -46,13 +46,7 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
     var checkPhone: (() -> Void)?
 
     var currentNumber: String {
-        let value = (self.inputNode.textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        // Only bare ASCII-digit numbers get the fixed +999 prefix. Preserve
-        // all other identifiers and numbers that already include the prefix.
-        if value.isEmpty || !value.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) || value.hasPrefix("999") {
-            return value
-        }
-        return "+999" + value
+        return (self.inputNode.textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var codeAndNumber: (Int32?, String?, String) {
@@ -125,10 +119,12 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         field.delegate = self
         field.addTarget(self, action: #selector(self.textChanged), for: .editingChanged)
 
+        self.inputNode.isHidden = true
+        self.separatorNode.isHidden = true
         self.separatorNode.isLayerBacked = true
         self.separatorNode.backgroundColor = theme.list.itemPlainSeparatorColor
         self.proceedNode.progressType = .embedded
-        self.proceedNode.isEnabled = false
+        self.proceedNode.isEnabled = true
         self.proceedNode.accessibilityIdentifier = "Auth.PhoneEntry.ContinueButton"
         self.proceedNode.pressed = { [weak self] in self?.submit() }
 
@@ -148,11 +144,11 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
     @objc private func openDebug() { self.debugAction() }
 
     @objc private func textChanged() {
-        self.proceedNode.isEnabled = !self.inProgress && !self.currentNumber.isEmpty
+        self.proceedNode.isEnabled = !self.inProgress
     }
 
     private func submit() {
-        guard !self.inProgress, !self.currentNumber.isEmpty else { return }
+        guard !self.inProgress else { return }
         self.checkPhone?()
     }
 
@@ -161,7 +157,7 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         return false
     }
 
-    func activateInput() { self.inputNode.textField.becomeFirstResponder() }
+    func activateInput() {}
     func animateError() { self.inputNode.layer.addShakeAnimation() }
 
     // Country updates and phone/passkey copy must not replace the Blah form.
@@ -194,9 +190,6 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         for (node, size, spacing) in [(self.titleNode as ASDisplayNode, titleSize, CGFloat(18.0)), (self.noticeNode as ASDisplayNode, noticeSize, CGFloat(18.0))] {
             items.append(AuthorizationLayoutItem(node: node, size: size, spacingBefore: AuthorizationLayoutItemSpacing(weight: spacing, maxValue: spacing), spacingAfter: AuthorizationLayoutItemSpacing(weight: 0.0, maxValue: 0.0)))
         }
-        // Match AuthorizationSequenceEmailEntryControllerNode's field and underline.
-        items.append(AuthorizationLayoutItem(node: self.inputNode, size: CGSize(width: width - 40.0, height: 44.0), spacingBefore: AuthorizationLayoutItemSpacing(weight: 18.0, maxValue: 30.0), spacingAfter: AuthorizationLayoutItemSpacing(weight: 0.0, maxValue: 0.0)))
-        items.append(AuthorizationLayoutItem(node: self.separatorNode, size: CGSize(width: width, height: UIScreenPixel), spacingBefore: AuthorizationLayoutItemSpacing(weight: 0.0, maxValue: 0.0), spacingAfter: AuthorizationLayoutItemSpacing(weight: 0.0, maxValue: 0.0)))
         let _ = layoutAuthorizationItems(bounds: CGRect(x: 0.0, y: top, width: layout.size.width, height: max(0.0, buttonY - top - 16.0)), items: items, transition: transition, failIfDoesNotFit: false)
     }
 }

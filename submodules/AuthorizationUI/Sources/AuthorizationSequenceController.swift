@@ -276,7 +276,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                             AuthorizationSequenceController.presentEmailComposeController(sharedContext: strongSelf.sharedContext, address: "recover@telegram.org", subject: strongSelf.presentationData.strings.Login_PhoneBannedEmailSubject(formattedNumber).string, body: strongSelf.presentationData.strings.Login_PhoneBannedEmailBody(formattedNumber, appVersion, systemVersion, locale, mnc).string, from: controller, presentationData: strongSelf.presentationData)
                                         }))
                                     case let .generic(info):
-                                        text = strongSelf.presentationData.strings.Login_UnknownError
+                                        text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                         actions.append(TextAlertAction(type: .genericAction, title: strongSelf.presentationData.strings.Common_OK, action: {}))
                                         actions.append(TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Login_PhoneNumberHelp, action: { [weak controller] in
                                             guard let strongSelf = self, let controller = controller else {
@@ -349,7 +349,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                             case .limitExceeded:
                                 text = strongSelf.presentationData.strings.Login_CodeFloodError
                             case .generic, .invalidEmailAddress, .codeExpired, .invalidEmailToken, .invalidCode:
-                                text = strongSelf.presentationData.strings.Login_UnknownError
+                                text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                             }
                             
                             controller.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
@@ -493,7 +493,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                                 resetCode = true
                                                 text = strongSelf.presentationData.strings.Login_InvalidCodeError
                                             case .generic:
-                                                text = strongSelf.presentationData.strings.Login_UnknownError
+                                                text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                             case .codeExpired:
                                                 text = strongSelf.presentationData.strings.Login_CodeExpired
                                                 let account = strongSelf.account
@@ -608,7 +608,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                                 resetCode = true
                                                 text = strongSelf.presentationData.strings.Login_InvalidCodeError
                                             case .generic:
-                                                text = strongSelf.presentationData.strings.Login_UnknownError
+                                                text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                             case .codeExpired:
                                                 text = strongSelf.presentationData.strings.Login_CodeExpired
                                                 let account = strongSelf.account
@@ -676,7 +676,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                 case .phoneBanned:
                                     text = strongSelf.presentationData.strings.Login_PhoneBannedError
                                 case .generic:
-                                    text = strongSelf.presentationData.strings.Login_UnknownError
+                                    text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                 case .timeout:
                                     text = strongSelf.presentationData.strings.Login_NetworkError
                             }
@@ -771,7 +771,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                         case .limitExceeded:
                             text = strongSelf.presentationData.strings.Login_CodeFloodError
                         case .generic, .codeExpired:
-                            text = strongSelf.presentationData.strings.Login_UnknownError
+                            text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                         case .timeout:
                             text = strongSelf.presentationData.strings.Login_NetworkError
                         case .invalidEmail:
@@ -840,7 +840,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                             case .limitExceeded:
                                 text = strongSelf.presentationData.strings.Login_CodeFloodError
                             case .generic, .codeExpired:
-                                text = strongSelf.presentationData.strings.Login_UnknownError
+                                text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                             case .invalidCode:
                                 text = strongSelf.presentationData.strings.Login_InvalidCodeError
                             case .timeout:
@@ -880,7 +880,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                     case .invalidCode:
                                         text = strongSelf.presentationData.strings.Login_InvalidCodeError
                                     case .generic:
-                                        text = strongSelf.presentationData.strings.Login_UnknownError
+                                        text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                     case .codeExpired:
                                         text = strongSelf.presentationData.strings.Login_CodeExpired
                                         let account = strongSelf.account
@@ -951,7 +951,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                     case .invalidPassword:
                                         text = strongSelf.presentationData.strings.LoginPassword_InvalidPasswordError
                                     case .generic:
-                                        text = strongSelf.presentationData.strings.Login_UnknownError
+                                        text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                 }
                                 
                                 controller.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
@@ -1011,7 +1011,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                     let text: String
                                     switch error {
                                         case .generic:
-                                            text = strongSelf.presentationData.strings.Login_UnknownError
+                                            text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                         case .limitExceeded:
                                             text = strongSelf.presentationData.strings.Login_ResetAccountProtected_LimitExceeded
                                     }
@@ -1098,7 +1098,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                             let text: String
                                             switch error {
                                                 case .generic:
-                                                    text = strongSelf.presentationData.strings.Login_UnknownError
+                                                    text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                                 case .limitExceeded:
                                                     text = strongSelf.presentationData.strings.Login_ResetAccountProtected_LimitExceeded
                                             }
@@ -1228,7 +1228,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                     case .invalidLastName:
                                         text = strongSelf.presentationData.strings.Login_InvalidLastNameError
                                     case .generic:
-                                        text = strongSelf.presentationData.strings.Login_UnknownError
+                                        text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
                                 }
                                 
                                 controller.present(textAlertController(sharedContext: strongSelf.sharedContext, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))

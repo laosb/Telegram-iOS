@@ -109,6 +109,8 @@
 // not 0 or the declared length is below 4. Every out-parameter must be
 // non-NULL. Exposed for tests.
 + (bool)_readIncomingPayload:(NSData *)data unauthorized:(bool)unauthorized salt:(int64_t *)salt sessionId:(int64_t *)sessionId messageId:(int64_t *)messageId seqNo:(int32_t *)seqNo topMessageSize:(int32_t *)topMessageSize body:(NSData **)body;
+// Public transport identifiers only; key material never crosses this boundary.
+- (void)identityBinding:(void (^)(int64_t keyId, int64_t sessionId))completion;
 
 - (void)simulateDisconnection;
 

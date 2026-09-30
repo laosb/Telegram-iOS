@@ -14,6 +14,7 @@ swift_library(
         "//submodules/TelegramUI/Components/NavigationBarNode",
         "//submodules/TelegramUI/Components/NavigationBarComponent",
         "//submodules/TelegramUI/Components/NavigationExpansionTransition",
+        "//submodules/BlahIdentityUI",
         "//submodules/AccountContext",
         "//submodules/LottieSettings:LottieSettings",
         "//submodules/AccountUtils",

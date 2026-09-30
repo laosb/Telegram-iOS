@@ -240,6 +240,9 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
         devicesLabel = ""
     }
     
+    items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 103, label: .text(""), text: presentationData.strings.blah_Identity_Title, icon: PresentationResourcesSettings.devices, action: {
+        interaction.openSettings(.blahIdentity)
+    }))
     items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 3, label: .text(devicesLabel), text: presentationData.strings.Settings_Devices, icon: PresentationResourcesSettings.devices, action: {
         interaction.openSettings(.devices)
     }))

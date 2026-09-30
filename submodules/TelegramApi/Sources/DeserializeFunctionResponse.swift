@@ -26,7 +26,7 @@ public final class FunctionDescription {
         return made
     }
 
-    init(name: String, parameters: [(String, ConstructorParameterDescription)]) {
+    public init(name: String, parameters: [(String, ConstructorParameterDescription)]) {
         self.name = name
         self.storedParameters = parameters
         self.makeParameters = nil

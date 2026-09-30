@@ -167,7 +167,7 @@ genrule(
     visibility = ["//Tests:__subpackages__"],
 )
 
-minimum_os_version = "15.0"
+minimum_os_version = "18.0"
 
 notificationServiceExtensionVersion = "v1"
 

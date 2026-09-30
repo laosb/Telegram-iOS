@@ -387,8 +387,13 @@ public func sendAuthorizationCode(accountManager: AccountManager<TelegramAccount
                                 return .loggedIn
                             }
                             |> castError(AuthorizationCodeRequestError.self)
-                        case .authorizationSignUpRequired:
-                            return .never()
+                        case let .authorizationSignUpRequired(required):
+                            transaction.setState(UnauthorizedAccountState(isTestingEnvironment: account.testingEnvironment,
+                                masterDatacenterId: account.masterDatacenterId, contents: .signUp(number: phoneNumber,
+                                codeHash: "", firstName: "", lastName: "",
+                                termsOfService: required.termsOfService.flatMap(UnauthorizedAccountTermsOfService.init(apiTermsOfService:)),
+                                syncContacts: syncContacts)))
+                            return .single(.sentCode(account))
                         }
                     }
                     return .single(.sentCode(account))

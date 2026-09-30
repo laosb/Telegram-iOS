@@ -1,0 +1,10 @@
+{
+  "Diem": {
+    "repository": "https://github.com/UInt8Co/diem",
+    "revision": "f86ee57b9383ec59a9494d06c39b94487ef71d1d"
+  },
+  "BlahDiem": {
+    "repository": "https://github.com/UInt8Co/BlahDiem",
+    "revision": "f9c52e884f846b5ff15c457c5847b24e807ab404"
+  }
+}

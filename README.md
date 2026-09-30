@@ -3,6 +3,53 @@
 We welcome all developers to use our API and source code to create applications on our platform.
 There are several things we require from **all developers** for the moment.
 
+## Blah identity flow
+
+This fork requires iOS 18 or later. **Choose identity** opens the native Identity Manager,
+also available in Settings. Connect to your home DC domain before creating an identity.
+The DC publishes its signed profile at `/.well-known/blah/profile.cbor` and advertises a
+plain TCP MTProto endpoint. iOS 18–25 supports Ed25519/P-256 DC profile signatures;
+ML-DSA requires iOS 26. Its identity, database generation and signed version are
+pinned per account; another home or identity requires another account slot. Unbound
+legacy transport sessions require a fresh account.
+
+Create an identity for a domain you can host, or import a password-encrypted identity
+file. Browser v1 backups from tweb/telegram-tt and native recovery files are accepted.
+Publish the exported public `profile.cbor` at every listed HTTPS domain with content type
+`application/cbor`. Sign in with the identity; supply an admission email if the DC requires
+one. Signup saves the allocated account number into the profile. Publish that updated
+file and sign in again to finish admission. Identity Manager also manages domains,
+username flags, devices, profile validity and renewal; publish every authority change.
+
+Identity custody lives in Keychain independently of chat storage. Native BlahDiem uses
+Secure Enclave P-256 device keys and seals the Ed25519 recovery key to another Secure
+Enclave key. **Unlock with Face ID or Touch ID** is optional; there is no separate identity
+passcode. Encrypted file export/import uses a backup password of at least 12 characters.
+**Sync recovery with iCloud Keychain** is opt-in and synchronizes the recoverable identity
+key and profile, not the hardware device keys. Recovery fetches the latest hosted profile,
+enrolls a fresh Secure Enclave device, and requires publication. Native recovery exports
+are for native recovery; they do not export the hardware device key as a browser identity.
+Custody locks when leaving management, on backgrounding, or after 15 idle minutes;
+continuing sign-in retains it until that flow finishes or the idle/background lock applies.
+Automatic renewal runs only while unlocked. Creation and recovery require real Secure
+Enclave hardware; the simulator has no software-key fallback.
+
+The integration is isolated in [BlahIdentity](submodules/BlahIdentity),
+[BlahIdentityUI](submodules/BlahIdentityUI), and the
+[network adapter](submodules/TelegramCore/Sources/Network/BlahIdentityNetwork.swift).
+[third-party/BlahDiem](third-party/BlahDiem) contains native Swift source snapshots with
+licenses and exact revisions. Refresh them from committed checkouts with:
+
+```sh
+python3 build-system/BlahDiem/vendor.py /path/to/diem /path/to/BlahDiem
+```
+
+The Apple backend uses CryptoKit through a small `Crypto` re-export. No WASM is linked
+into the native app. Build through the repository's `build-system/Make/Make.py` workflow
+with the configured Xcode and signing environment. Device validation must cover cancelled
+biometric prompts, lock/background transitions, publication after signup, file recovery,
+and iCloud recovery on a second device.
+
 # Creating your Telegram Application
 
 1. [**Obtain your own api_id**](https://core.telegram.org/api/obtaining_api_id) for your application.

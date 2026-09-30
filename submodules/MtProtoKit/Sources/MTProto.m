@@ -361,6 +361,12 @@ static const NSUInteger MTMaxUnacknowledgedMessageCount = 64;
     }];
 }
 
+- (void)identityBinding:(void (^)(int64_t keyId, int64_t sessionId))completion {
+    [[MTProto managerQueue] dispatchOnQueue:^{
+        completion(self->_validAuthInfo.authInfo.authKeyId, self->_sessionInfo.sessionId);
+    }];
+}
+
 - (void)resetSessionInfo:(bool)ifActive
 {
     [[MTProto managerQueue] dispatchOnQueue:^

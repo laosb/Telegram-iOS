@@ -27,16 +27,8 @@ public struct CustomDCConfig {
     /// The active custom DC config, or `nil` when running against the standard Telegram network.
     public static var shared: CustomDCConfig? { _customDCConfigData }
 
-    /// Returns the custom `defaultDcId` when a server config is active, otherwise falls back
-    /// to the standard Telegram convention (DC 1 for debug builds, DC 2 for release).
-    public static var initialDatacenterId: Int {
-        if let dc = _customDCConfigData { return dc.defaultDcId }
-        #if DEBUG
-        return 1
-        #else
-        return 2
-        #endif
-    }
+    /// Each independently pinned Blah home occupies DC 1 in its own account slot.
+    public static var initialDatacenterId: Int { 1 }
 
     /// Overrides seed addresses and pre-loads RSA public keys for each custom DC.
     /// Also wipes any keychain-persisted addresses for standard Telegram DC IDs we don't use,
@@ -62,6 +54,8 @@ public struct CustomDCConfig {
                     seedAddressSet: MTDatacenterAddressSet(addressList: addresses)
                 )
             }
+            context.updateAddressSetForDatacenter(withId: dc.id,
+                addressSet: MTDatacenterAddressSet(addressList: addresses), forceUpdateSchemes: true)
             context.updatePublicKeysForDatacenter(withId: dc.id, publicKeys: [["key": dc.rsaPublicKeyPem]])
             NSLog("[blah] CustomDCConfig: DC %d — %d endpoints, RSA key registered", dc.id, addresses.count)
         }

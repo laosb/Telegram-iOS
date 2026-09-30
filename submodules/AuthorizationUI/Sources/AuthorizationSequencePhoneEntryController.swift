@@ -1,3 +1,4 @@
+import BlahIdentityUI
 import Foundation
 import UIKit
 import Display
@@ -388,6 +389,15 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     
     @objc func nextPressed() {
         guard !self.inProgress, self.confirmationController == nil else {
+            return
+        }
+        if let account = self.account {
+            let identityController = blahIdentityController(network: account.network, presentationData: self.presentationData,
+                signIn: { [weak self] domain in
+                    guard let self else { return }
+                    self.loginWithNumber?(domain, false)
+                })
+            (self.navigationController as? NavigationController)?.pushViewController(identityController)
             return
         }
         let (_, _, number) = self.controllerNode.codeAndNumber

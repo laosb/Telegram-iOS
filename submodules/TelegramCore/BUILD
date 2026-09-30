@@ -12,6 +12,8 @@ swift_library(
         "-warnings-as-errors",
     ],
     deps = [
+        "//submodules/BlahIdentity:BlahIdentity",
+        "//third-party/BlahDiem:BlahDiem",
         "//submodules/TelegramApi:TelegramApi",
         "//submodules/MtProtoKit:MtProtoKit",
         "//submodules/MediaPreuploadRegistry:MediaPreuploadRegistry",

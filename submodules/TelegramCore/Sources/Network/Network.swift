@@ -609,63 +609,13 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
                 }
             }
             
-            let seedAddressList: [Int: [String]]
-            
-            if testingEnvironment {
-                seedAddressList = [
-                    1: ["149.154.175.10"],
-                    2: ["149.154.167.40"],
-                    3: ["149.154.175.117"]
-                ]
-            } else {
-                seedAddressList = [
-                    1: ["149.154.175.50", "2001:b28:f23d:f001::a"],
-                    2: ["149.154.167.50", "95.161.76.100", "2001:67c:4e8:f002::a"],
-                    3: ["149.154.175.100", "2001:b28:f23d:f003::a"],
-                    4: ["149.154.167.91", "2001:67c:4e8:f004::a"],
-                    5: ["149.154.171.5", "2001:b28:f23f:f005::a"]
-                ]
-            }
-            
-            if let customConfig = CustomDCConfig.shared {
-                customConfig.apply(to: context)
-            } else {
-                for (id, ips) in seedAddressList {
-                    context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: ips.map { MTDatacenterAddress(ip: $0, port: 443, preferForMedia: false, restrictToTcp: false, cdn: false, preferForProxy: false, secret: nil) }))
-                }
-            }
-            
+            // Blah installs addresses only after verifying this account's pinned home.
             context.keychain = keychain
-            var wrappedAdditionalSource: MTSignal?
-            #if os(iOS)
-            if #available(iOS 10.0, *), !supplementary, arguments.isICloudEnabled {
-                var cloudDataContextValue: CloudDataContext?
-                if let value = cloudDataContext.with({ $0 }) {
-                    cloudDataContextValue = value
-                } else {
-                    cloudDataContextValue = makeCloudDataContext(encryptionProvider: arguments.encryptionProvider)
-                    let _ = cloudDataContext.swap(cloudDataContextValue)
-                }
-                
-                if let cloudDataContext = cloudDataContextValue {
-                    wrappedAdditionalSource = MTSignal(generator: { subscriber in
-                        let disposable = cloudDataContext.get(phoneNumber: .single(phoneNumber)).start(next: { value in
-                            subscriber?.putNext(value)
-                        }, completed: {
-                            subscriber?.putCompletion()
-                        })
-                        return MTBlockDisposable(block: {
-                            disposable.dispose()
-                        })
-                    })
-                }
+            for id in 1...5 {
+                context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: []))
+                context.updateAddressSetForDatacenter(withId: id, addressSet: MTDatacenterAddressSet(addressList: []), forceUpdateSchemes: true)
             }
-            #endif
-            
             if !supplementary {
-                if CustomDCConfig.shared == nil {
-                    context.setDiscoverBackupAddressListSignal(MTBackupAddressSignals.fetchBackupIps(testingEnvironment, currentContext: context, additionalSource: wrappedAdditionalSource, phoneNumber: phoneNumber, mainDatacenterId: datacenterId))
-                }
                 let externalRequestVerificationStream = arguments.externalRequestVerificationStream
                 context.setExternalRequestVerification({ nonce in
                     return MTSignal(generator: { subscriber in
@@ -749,6 +699,7 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             
             let mainSessionDelegate = NetworkMainSessionDelegate(connectionStatus: connectionStatus)
             let mainSession = engine.makeSession(datacenterId: datacenterId, role: .main, usageCalculationInfo: usageCalculationInfo(basePath: basePath, category: nil), delegate: mainSessionDelegate)
+            mainSession.setPaused(true)
             
             var useExperimentalFeatures = networkSettings?.useExperimentalDownload ?? true
             if let data = appConfiguration.data, let _ = data["ios_killswitch_disable_downloadv2"] {
@@ -757,6 +708,8 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             
             let network = Network(queue: queue, datacenterId: datacenterId, context: context, engine: engine, switchingEngine: switchingEngine, engineFactory: arguments.networkEngineFactory, rustEngineDisabled: rustEngineDisabled, rustEngineWaitsForWebProxy: rustEngineWaitsForWebProxy, mainSession: mainSession, mainSessionDelegate: mainSessionDelegate, telemetry: telemetry, _connectionStatus: connectionStatus, basePath: basePath, appDataDisposable: appDataDisposable, encryptionProvider: arguments.encryptionProvider, useRequestTimeoutTimers: useRequestTimeoutTimers, useBetaFeatures: arguments.useBetaFeatures, useExperimentalFeatures: useExperimentalFeatures, baseTcpConnectionInterfaceFactory: baseTcpConnectionInterfaceFactory, isAppExtension: isAppExtension, initialWebProxyActive: initialActiveServer?.isWebProxy == true)
             
+            network.restoreBlahHome()
+
             if let data = appConfiguration.data, let notifyInterval = data["upload_premium_speedup_notify_period"] as? Double {
                 network.updateNetworkSpeedLimitedEventNotifyInterval(value: notifyInterval)
             }
@@ -912,7 +865,7 @@ private final class NetworkSpeedLimitedEventState {
 public final class Network: NSObject {
     public let encryptionProvider: EncryptionProvider
     
-    private let queue: Queue
+    let queue: Queue
     public let datacenterId: Int
     public let context: MTContext
     private var networkHelper: NetworkHelper?
@@ -924,6 +877,8 @@ public final class Network: NSObject {
     let mainSession: NetworkEngineSession
     let requestService: NetworkEngineRequestService
     let basePath: String
+    let blahHomeReady = ValuePromise<Bool>(false, ignoreRepeated: true)
+    let blahIdentityError = Atomic<String?>(value: nil)
     private let mainSessionDelegate: NetworkMainSessionDelegate
     /// Records requests and failures of every session, whichever engine runs them. Nil unless
     /// `network_telemetry_enabled` was set when the network started (always set in Debug builds).
@@ -1066,7 +1021,8 @@ public final class Network: NSObject {
             }
         }, isContextNetworkAccessAllowed: { [weak self] in
             if let strongSelf = self {
-                return strongSelf.shouldKeepConnection.get() |> distinctUntilChanged
+                return combineLatest(strongSelf.shouldKeepConnection.get(), strongSelf.blahHomeReady.get())
+                |> map { requested, ready in requested && ready } |> distinctUntilChanged
             } else {
                 return .single(false)
             }
@@ -1095,7 +1051,7 @@ public final class Network: NSObject {
                     datacenterId = id
                     isCdn = true
                 }
-                if datacenterId != 0 {
+                if datacenterId == strongSelf.datacenterId && !isCdn {
                     return strongSelf.makeWorker(datacenterId: datacenterId, isCdn: isCdn, isMedia: isMedia, tag: tag, continueInBackground: continueInBackground)
                 } else {
                     return nil
@@ -1147,7 +1103,8 @@ public final class Network: NSObject {
         }
         #endif
 
-        let shouldKeepConnectionSignal = self.shouldKeepConnection.get()
+        let shouldKeepConnectionSignal = combineLatest(self.shouldKeepConnection.get(), self.blahHomeReady.get())
+        |> map { requested, ready in requested && ready }
         |> distinctUntilChanged |> deliverOn(queue)
         self.shouldKeepConnectionDisposable.set(shouldKeepConnectionSignal.start(next: { [weak self] value in
             if let strongSelf = self {
@@ -1319,7 +1276,7 @@ public final class Network: NSObject {
     
     private func worker(datacenterId: Int, isCdn: Bool, isMedia: Bool, tag: MediaResourceFetchTag?) -> Signal<Download, NoError> {
         return Signal { [weak self] subscriber in
-            if let strongSelf = self {
+            if let strongSelf = self, datacenterId == strongSelf.datacenterId, !isCdn {
                 subscriber.putNext(strongSelf.makeWorker(datacenterId: datacenterId, isCdn: isCdn, isMedia: isMedia, tag: tag))
             }
             subscriber.putCompletion()
@@ -1391,7 +1348,7 @@ public final class Network: NSObject {
                     return nil
                 },
                 options: NetworkEngineRequestOptions(),
-                shouldContinueAfterError: networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
+                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _, _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
                 dependsOn: networkRequestDependency(tag: tag),
                 acknowledged: {
                     if info.contains(.acknowledgement) {
@@ -1423,7 +1380,14 @@ public final class Network: NSObject {
         }
     }
     
-    func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
+    public func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
+        if blahNeedsIdentity(data.0.name) {
+            return self.blahRequest(data)
+        }
+        return self.blahRawRequest(data, tag: tag, automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError)
+    }
+
+    func blahRawRequest<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
         let requestService = self.requestService
         return Signal { [requestService] subscriber in
             let request = NetworkEngineRequest(
@@ -1437,7 +1401,7 @@ public final class Network: NSObject {
                     return nil
                 },
                 options: NetworkEngineRequestOptions(),
-                shouldContinueAfterError: networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
+                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _, _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
                 dependsOn: networkRequestDependency(tag: tag),
                 acknowledged: nil,
                 progress: nil,
