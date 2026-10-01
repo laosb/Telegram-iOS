@@ -50,43 +50,43 @@ public struct DCProfile: BlahProfile {
 
   public init(data: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidProfile
-    let fields = try CBOR.record(data, tag: .profile, count: 8, error: e)
-    guard fields[2] == .unsigned(ProfileKind.dc.rawValue) else { throw e }
+    let fields = try CBOR.record(data, tag: .profile, requiredKeys: 0..<8, error: e)
+    guard fields[2]! == .unsigned(ProfileKind.dc.rawValue) else { throw e }
     func endpoints(_ value: CBOR) throws(BlahError) -> [Endpoint] {
       var result: [Endpoint] = []
       for entry in try value.array(e) {
-        let a = try entry.array(e, count: 5)
-        guard let port = UInt16(exactly: try a[1].unsigned(e)), case .bool(let tls) = a[2],
-          let transport = Transport(rawValue: try a[3].unsigned(e)) else {
+        let a = try entry.record(e, requiredKeys: 0..<5)
+        guard let port = UInt16(exactly: try a[1]!.unsigned(e)), case .bool(let tls) = a[2]!,
+          let transport = Transport(rawValue: try a[3]!.unsigned(e)) else {
           throw e
         }
-        result.append(Endpoint(host: try a[0].text(e), port: port, tls: tls,
-          transport: transport, path: a[4] == .null ? nil : try a[4].text(e)))
+        result.append(Endpoint(host: try a[0]!.text(e), port: port, tls: tls,
+          transport: transport, path: a[4]! == .null ? nil : try a[4]!.text(e)))
       }
       return result
     }
     var domains: [String] = []
-    for domain in try fields[3].array(e) { domains.append(try domain.text(e)) }
+    for domain in try fields[3]!.array(e) { domains.append(try domain.text(e)) }
     self.domains = domains
-    self.endpoints = try endpoints(fields[4])
-    self.bidcomEndpoints = try endpoints(fields[5])
-    self.transportPublicKey = try fields[6].text(e)
-    self.namespaceGeneration = fields[7] == .null ? nil : try fields[7].unsigned(e)
+    self.endpoints = try endpoints(fields[4]!)
+    self.bidcomEndpoints = try endpoints(fields[5]!)
+    self.transportPublicKey = try fields[6]!.text(e)
+    self.namespaceGeneration = fields[7]! == .null ? nil : try fields[7]!.unsigned(e)
     try validate()
   }
 
   public func encoded() throws(BlahError) -> [UInt8] {
     try validate()
     func encode(_ endpoints: [Endpoint]) -> CBOR {
-      .array(endpoints.map { .array([
-        .text($0.host), .unsigned(UInt64($0.port)), .bool($0.tls),
-        .unsigned($0.transport.rawValue), $0.path.map(CBOR.text) ?? .null,
+      .array(endpoints.map { .record([
+        0: .text($0.host), 1: .unsigned(UInt64($0.port)), 2: .bool($0.tls),
+        3: .unsigned($0.transport.rawValue), 4: $0.path.map(CBOR.text) ?? .null,
       ]) })
     }
-    return CBOR.array([
-      .unsigned(BlahTag.profile.rawValue), .unsigned(1), .unsigned(ProfileKind.dc.rawValue),
-      .array(domains.map(CBOR.text)), encode(endpoints), encode(bidcomEndpoints),
-      .text(transportPublicKey), namespaceGeneration.map(CBOR.unsigned) ?? .null,
+    return CBOR.record([
+      0: .unsigned(BlahTag.profile.rawValue), 1: .unsigned(1), 2: .unsigned(ProfileKind.dc.rawValue),
+      3: .array(domains.map(CBOR.text)), 4: encode(endpoints), 5: encode(bidcomEndpoints),
+      6: .text(transportPublicKey), 7: namespaceGeneration.map(CBOR.unsigned) ?? .null,
     ]).encoded
   }
 

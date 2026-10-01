@@ -17,13 +17,13 @@ public struct DeviceCertificate: Hashable, Sendable {
 
   /// Decodes a certificate from the identity's signed message.
   public init(_ signedMessage: SignedMessage) throws(DiemError) {
-    let a = try CBOR(decoding: signedMessage.message).arrayValue(count: 7)
-    guard a[0] == .text("Diem/device"), a[1] == .unsigned(3) else { throw .invalidEncoding }
-    identityID = try Digest(bytes: a[2].bytesValue())
-    generation = try a[3].unsignedValue()
+    let a = try CBOR(decoding: signedMessage.message).recordValue(requiredKeys: 0..<7)
+    guard a[0]! == .text("Diem/device"), a[1]! == .unsigned(3) else { throw .invalidEncoding }
+    identityID = try Digest(bytes: a[2]!.bytesValue())
+    generation = try a[3]!.unsignedValue()
     guard generation > 0, generation <= UInt64(Int64.max) else { throw .invalidEncoding }
-    device = try DevicePublicKey(PublicKey(encoding: a[4].bytesValue()))
-    validity = try Validity(notBefore: a[5].unsignedValue(), expiresAt: a[6].unsignedValue())
+    device = try DevicePublicKey(PublicKey(encoding: a[4]!.bytesValue()))
+    validity = try Validity(notBefore: a[5]!.unsignedValue(), expiresAt: a[6]!.unsignedValue())
     self.signedMessage = signedMessage
   }
 
@@ -39,10 +39,10 @@ public struct DeviceCertificate: Hashable, Sendable {
     by identityKey: IdentityPrivateKey, for device: DevicePublicKey, generation: UInt64,
     validity: Validity
   ) async throws -> Self {
-    let message = CBOR.array([
-      .text("Diem/device"), .unsigned(3), .bytes(identityKey.publicKey.id.bytes),
-      .unsigned(generation), .bytes(device.key.encoding), .unsigned(validity.notBefore),
-      .unsigned(validity.expiresAt),
+    let message = CBOR.record([
+      0: .text("Diem/device"), 1: .unsigned(3), 2: .bytes(identityKey.publicKey.id.bytes),
+      3: .unsigned(generation), 4: .bytes(device.key.encoding), 5: .unsigned(validity.notBefore),
+      6: .unsigned(validity.expiresAt),
     ]).encoded
     return try Self(await SignedMessage(signing: message, with: identityKey.key))
   }

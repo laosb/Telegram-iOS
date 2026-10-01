@@ -22,9 +22,9 @@ public struct ClientNamespace: Hashable, Sendable {
 
   /// The canonical encoding.
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.clientNamespace.rawValue), .unsigned(1), .bytes(identityID.bytes),
-      .text(dc.domain), .bytes(dc.id.bytes), .unsigned(generation), .unsigned(homeEpoch),
+    CBOR.record([
+      0: .unsigned(BlahTag.clientNamespace.rawValue), 1: .unsigned(1), 2: .bytes(identityID.bytes),
+      3: .text(dc.domain), 4: .bytes(dc.id.bytes), 5: .unsigned(generation), 6: .unsigned(homeEpoch),
     ]).encoded
   }
 

@@ -12,6 +12,8 @@ public struct LoginChallenge: BlahStatement {
   public let deviceID: Digest
   /// The `Profile.digest` of the profile the device signs in with.
   public let profileDigest: Digest
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let dc: DCAddress
   public let authKeyID: Int64
   public let sessionID: UInt64
@@ -36,22 +38,23 @@ public struct LoginChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .login, count: 12, error: e)
-    guard let operation = Operation(rawValue: try a[2].unsigned(e)) else { throw e }
+    let a = try CBOR.record(encoding, tag: .login, requiredKeys: 0..<12, error: e)
+    guard let operation = Operation(rawValue: try a[2]!.unsigned(e)) else { throw e }
     try self.init(
-      operation: operation, nonce: a[3].bytes(e), expiresAt: a[4].unsigned(e),
-      identityID: a[5].digest(e), deviceID: a[6].digest(e), profileDigest: a[7].digest(e),
-      dc: DCAddress(domain: a[8].text(e), id: a[9].digest(e)),
-      authKeyID: Int64(bitPattern: a[10].unsigned(e)), sessionID: a[11].unsigned(e))
+      operation: operation, nonce: a[3]!.bytes(e), expiresAt: a[4]!.unsigned(e),
+      identityID: a[5]!.digest(e), deviceID: a[6]!.digest(e), profileDigest: a[7]!.digest(e),
+      dc: DCAddress(domain: a[8]!.text(e), id: a[9]!.digest(e)),
+      authKeyID: Int64(bitPattern: a[10]!.unsigned(e)), sessionID: a[11]!.unsigned(e))
+    extensionFields = a.filter { $0.key >= 12 }
   }
 
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.login.rawValue), .unsigned(1), .unsigned(operation.rawValue),
-      .bytes(nonce), .unsigned(expiresAt), .bytes(identityID.bytes), .bytes(deviceID.bytes),
-      .bytes(profileDigest.bytes), .text(dc.domain), .bytes(dc.id.bytes),
-      .unsigned(UInt64(bitPattern: authKeyID)), .unsigned(sessionID),
-    ]).encoded
+    CBOR.record([
+      0: .unsigned(BlahTag.login.rawValue), 1: .unsigned(1), 2: .unsigned(operation.rawValue),
+      3: .bytes(nonce), 4: .unsigned(expiresAt), 5: .bytes(identityID.bytes), 6: .bytes(deviceID.bytes),
+      7: .bytes(profileDigest.bytes), 8: .text(dc.domain), 9: .bytes(dc.id.bytes),
+      10: .unsigned(UInt64(bitPattern: authKeyID)), 11: .unsigned(sessionID),
+    ], extensions: extensionFields).encoded
   }
 
   /// Requires a live challenge for this identity, device and profile, from its home DC.

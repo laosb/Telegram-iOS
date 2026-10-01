@@ -19,7 +19,7 @@ Publish the exported public `profile.cbor` at every listed HTTPS domain with con
 `application/cbor`. Sign in with the identity; supply an admission email if the DC requires
 one. Signup saves the allocated account number into the profile. Publish that updated
 file and sign in again to finish admission. Identity Manager also manages domains,
-username flags, devices, profile validity and renewal; publish every authority change.
+devices, profile validity and renewal; publish every authority change.
 
 Identity custody lives in Keychain independently of chat storage. Native BlahDiem uses
 Secure Enclave P-256 device keys and seals the Ed25519 recovery key to another Secure
@@ -33,6 +33,9 @@ Custody locks when leaving management, on backgrounding, or after 15 idle minute
 continuing sign-in retains it until that flow finishes or the idle/background lock applies.
 Automatic renewal runs only while unlocked. Creation and recovery require real Secure
 Enclave hardware; the simulator has no software-key fallback.
+
+Every profile domain is a username candidate. Publish the profile at each domain,
+then verify it with the home DC and choose active usernames in Edit Profile.
 
 The integration is isolated in [BlahIdentity](submodules/BlahIdentity),
 [BlahIdentityUI](submodules/BlahIdentityUI), and the

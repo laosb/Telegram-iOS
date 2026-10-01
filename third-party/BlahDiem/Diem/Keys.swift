@@ -33,6 +33,7 @@ public struct PublicKey: Hashable, Sendable {
   public let purpose: Purpose
   public let algorithm: Algorithm
   public let rawRepresentation: [UInt8]
+  private var extensionFields: [UInt64: CBOR] = [:]
 
   /// A key for `purpose` of `algorithm` with raw public key bytes.
   public init(purpose: Purpose, algorithm: Algorithm, rawRepresentation: [UInt8])
@@ -57,11 +58,12 @@ public struct PublicKey: Hashable, Sendable {
     guard let purpose = Purpose(rawValue: purposeCode), let algorithm = Algorithm(rawValue: code)
     else { throw .invalidKey }
     try self.init(purpose: purpose, algorithm: algorithm, rawRepresentation: raw)
+    extensionFields = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5).filter { $0.key >= 5 }
   }
 
   /// The purpose- and algorithm-qualified canonical encoding.
   public var encoding: [UInt8] {
-    KeyEncoding.encode(purpose.rawValue, algorithm.rawValue, rawRepresentation)
+    KeyEncoding.encode(purpose.rawValue, algorithm.rawValue, rawRepresentation, extensions: extensionFields)
   }
 
   /// The SHA-256 digest of ``encoding``.
@@ -113,6 +115,7 @@ public struct EncryptionPublicKey: Hashable, Sendable {
 
   public let algorithm: Algorithm
   public let rawRepresentation: [UInt8]
+  private var extensionFields: [UInt64: CBOR] = [:]
 
   /// A key of `algorithm` with raw public key bytes.
   public init(algorithm: Algorithm, rawRepresentation: [UInt8]) throws(DiemError) {
@@ -134,11 +137,12 @@ public struct EncryptionPublicKey: Hashable, Sendable {
     guard purpose == KeyEncoding.encryptionPurpose, let algorithm = Algorithm(rawValue: code)
     else { throw .invalidKey }
     try self.init(algorithm: algorithm, rawRepresentation: raw)
+    extensionFields = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5).filter { $0.key >= 5 }
   }
 
   /// The purpose- and algorithm-qualified canonical encoding.
   public var encoding: [UInt8] {
-    KeyEncoding.encode(KeyEncoding.encryptionPurpose, algorithm.rawValue, rawRepresentation)
+    KeyEncoding.encode(KeyEncoding.encryptionPurpose, algorithm.rawValue, rawRepresentation, extensions: extensionFields)
   }
 
   /// The SHA-256 digest of ``encoding``.
@@ -181,20 +185,20 @@ public struct SealedBox: Hashable, Sendable {
   }
 }
 
-/// `["Diem/key", 3, purpose, algorithm, raw]`. Purposes 1 and 2 are the signing
+/// Integer-keyed key record. Purposes 1 and 2 are the signing
 /// ``PublicKey/Purpose`` codes; 3 is encryption.
 enum KeyEncoding {
   static let encryptionPurpose: UInt64 = 3
 
-  static func encode(_ purpose: UInt64, _ algorithm: UInt64, _ raw: [UInt8]) -> [UInt8] {
-    CBOR.array([
-      .text("Diem/key"), .unsigned(3), .unsigned(purpose), .unsigned(algorithm), .bytes(raw),
-    ]).encoded
+  static func encode(_ purpose: UInt64, _ algorithm: UInt64, _ raw: [UInt8], extensions: [UInt64: CBOR]) -> [UInt8] {
+    CBOR.record([
+      0: .text("Diem/key"), 1: .unsigned(3), 2: .unsigned(purpose), 3: .unsigned(algorithm), 4: .bytes(raw),
+    ], extensions: extensions).encoded
   }
 
   static func decode(_ encoding: [UInt8]) throws(DiemError) -> (UInt64, UInt64, [UInt8]) {
-    let a = try CBOR(decoding: encoding).arrayValue(count: 5)
-    guard a[0] == .text("Diem/key"), a[1] == .unsigned(3) else { throw .invalidKey }
-    return try (a[2].unsignedValue(), a[3].unsignedValue(), a[4].bytesValue())
+    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5)
+    guard a[0]! == .text("Diem/key"), a[1]! == .unsigned(3) else { throw .invalidKey }
+    return try (a[2]!.unsignedValue(), a[3]!.unsignedValue(), a[4]!.bytesValue())
   }
 }

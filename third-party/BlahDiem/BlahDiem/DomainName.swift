@@ -23,20 +23,17 @@ public enum DomainName {
   }
 }
 
-/// A domain that serves a profile. A username domain is also the identity's public name.
+/// A domain that serves a profile and is a candidate for a public username.
 public struct ProfileDomain: Hashable, Sendable {
   public let name: String
-  public let isUsername: Bool
-
-  public init(_ name: String, isUsername: Bool = false) throws(BlahError) {
+  public init(_ name: String) throws(BlahError) {
     guard DomainName.isValid(name) else { throw .invalidName }
-    self.init(unchecked: name, isUsername: isUsername)
+    self.init(unchecked: name)
   }
 
   /// A domain that profile encoding validates.
-  init(unchecked name: String, isUsername: Bool) {
+  init(unchecked name: String) {
     self.name = name
-    self.isUsername = isUsername
   }
 }
 

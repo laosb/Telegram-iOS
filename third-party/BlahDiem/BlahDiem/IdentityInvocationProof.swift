@@ -1,6 +1,8 @@
 /// A DC's one-use challenge for an identity-proven MTProto call. ``domain`` serves the
 /// profile the DC verifies the proof against.
 public struct InvocationChallenge: Hashable, Sendable {
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let domain: String
   public let nonce: [UInt8]
   public let expiresAt: UInt64
@@ -26,23 +28,26 @@ public struct InvocationChallenge: Hashable, Sendable {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .invocationChallenge, count: 8, error: e)
+    let a = try CBOR.record(encoding, tag: .invocationChallenge, requiredKeys: 0..<8, error: e)
     try self.init(
-      domain: a[2].text(e), nonce: a[3].bytes(e), expiresAt: a[4].unsigned(e), dc: a[5].digest(e),
-      transportKeyID: Int64(bitPattern: a[6].unsigned(e)), sessionID: a[7].unsigned(e))
+      domain: a[2]!.text(e), nonce: a[3]!.bytes(e), expiresAt: a[4]!.unsigned(e), dc: a[5]!.digest(e),
+      transportKeyID: Int64(bitPattern: a[6]!.unsigned(e)), sessionID: a[7]!.unsigned(e))
+    extensionFields = a.filter { $0.key >= 8 }
   }
 
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.invocationChallenge.rawValue), .unsigned(1), .text(domain), .bytes(nonce),
-      .unsigned(expiresAt), .bytes(dc.bytes), .unsigned(UInt64(bitPattern: transportKeyID)),
-      .unsigned(sessionID),
-    ]).encoded
+    CBOR.record([
+      0: .unsigned(BlahTag.invocationChallenge.rawValue), 1: .unsigned(1), 2: .text(domain), 3: .bytes(nonce),
+      4: .unsigned(expiresAt), 5: .bytes(dc.bytes), 6: .unsigned(UInt64(bitPattern: transportKeyID)),
+      7: .unsigned(sessionID),
+    ], extensions: extensionFields).encoded
   }
 }
 
 /// A challenge and the SHA-512 digest of the exact wrapped MTProto query it authorizes.
 public struct InvocationStatement: BlahStatement {
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let challenge: InvocationChallenge
   public let payloadDigest: [UInt8]
 
@@ -54,18 +59,19 @@ public struct InvocationStatement: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .invocationStatement, count: 5, error: e)
+    let a = try CBOR.record(encoding, tag: .invocationStatement, requiredKeys: 0..<5, error: e)
     // Field 3 names the digest algorithm: 1 is SHA-512.
-    guard a[3] == .unsigned(1) else { throw e }
-    challenge = try InvocationChallenge(encoding: a[2].bytes(e))
-    payloadDigest = try a[4].bytes(e, count: 64)
+    guard a[3]! == .unsigned(1) else { throw e }
+    challenge = try InvocationChallenge(encoding: a[2]!.bytes(e))
+    payloadDigest = try a[4]!.bytes(e, count: 64)
+    extensionFields = a.filter { $0.key >= 5 }
   }
 
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.invocationStatement.rawValue), .unsigned(1), .bytes(challenge.encoding),
-      .unsigned(1), .bytes(payloadDigest),
-    ]).encoded
+    CBOR.record([
+      0: .unsigned(BlahTag.invocationStatement.rawValue), 1: .unsigned(1), 2: .bytes(challenge.encoding),
+      3: .unsigned(1), 4: .bytes(payloadDigest),
+    ], extensions: extensionFields).encoded
   }
 
   /// Whether this statement authorizes exactly `payload`.

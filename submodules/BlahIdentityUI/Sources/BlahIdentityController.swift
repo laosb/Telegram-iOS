@@ -183,10 +183,7 @@ private final class IdentityCoordinator: NSObject, UIDocumentPickerDelegate {
             }
             row(strings.blah_Identity_Renew, section: 2) { [weak self] _ in self?.change(.renew) }
             for domain in identity.user.domains {
-                row(domain.name, section: 3, value: domain.isUsername) { [weak self] enabled in
-                    guard let updated = try? identity.user.domains.map({ try ProfileDomain($0.name, isUsername: $0.name == domain.name ? enabled ?? false : $0.isUsername) }) else { return }
-                    self?.change(.domains(updated))
-                }
+                row(domain.name, section: 3, text: true)
                 if identity.user.domains.count > 1 {
                     row("\(strings.blah_Identity_RemoveDomain): \(domain.name)", section: 3, destructive: true) { [weak self] _ in
                         self?.change(.domains(identity.user.domains.filter { $0.name != domain.name }))

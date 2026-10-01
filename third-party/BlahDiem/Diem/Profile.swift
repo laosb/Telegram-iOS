@@ -1,6 +1,8 @@
 /// An identity's public statement: its key, its certified devices, and application data
 /// signed by one of those devices.
 public struct Profile: Hashable, Sendable {
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   /// Default publishing lifetime. Applications may choose a different interval.
   public static let defaultLifetime: UInt64 = 24 * 60 * 60
   /// The wire timestamp bound; a profile must also fit its signing certificate.
@@ -34,32 +36,33 @@ public struct Profile: Hashable, Sendable {
   /// Decodes a well-formed profile from its ``encoding``. ``verify(using:at:)`` checks its
   /// signatures and validity.
   public init(encoding: [UInt8]) throws(DiemError) {
-    let a = try CBOR(decoding: encoding).arrayValue(count: 5)
-    guard a[0] == .text("Diem/profile"), a[1] == .unsigned(3) else { throw .invalidEncoding }
-    let certificates = try a[3].arrayValue()
+    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5)
+    guard a[0]! == .text("Diem/profile"), a[1]! == .unsigned(3) else { throw .invalidEncoding }
+    let certificates = try a[3]!.arrayValue()
     var devices: [DeviceCertificate] = []
     for certificate in certificates {
       devices.append(try DeviceCertificate(encoding: certificate.bytesValue()))
     }
     try self.init(
-      identityKey: IdentityPublicKey(PublicKey(encoding: a[2].bytesValue())), devices: devices,
-      content: SignedMessage(encoding: a[4].bytesValue()))
+      identityKey: IdentityPublicKey(PublicKey(encoding: a[2]!.bytesValue())), devices: devices,
+      content: SignedMessage(encoding: a[4]!.bytesValue()))
+    extensionFields = a.filter { $0.key >= 5 }
   }
 
   private init(identityKey: IdentityPublicKey, devices: [DeviceCertificate], content: SignedMessage)
     throws(DiemError)
   {
-    let c = try CBOR(decoding: content.message).arrayValue(count: 10)
-    guard c[0] == .text("Diem/profile-content"), c[1] == .unsigned(3) else {
+    let c = try CBOR(decoding: content.message).recordValue(requiredKeys: 0..<10)
+    guard c[0]! == .text("Diem/profile-content"), c[1]! == .unsigned(3) else {
       throw .invalidEncoding
     }
-    guard try Digest(bytes: c[2].bytesValue()) == identityKey.id else { throw .identityMismatch }
-    generation = try c[3].unsignedValue()
-    let signerID = try Digest(bytes: c[4].bytesValue())
-    revision = try c[5].unsignedValue()
-    let previous = try c[6].bytesValue()
-    validity = try Validity(notBefore: c[7].unsignedValue(), expiresAt: c[8].unsignedValue())
-    data = try c[9].bytesValue()
+    guard try Digest(bytes: c[2]!.bytesValue()) == identityKey.id else { throw .identityMismatch }
+    generation = try c[3]!.unsignedValue()
+    let signerID = try Digest(bytes: c[4]!.bytesValue())
+    revision = try c[5]!.unsignedValue()
+    let previous = try c[6]!.bytesValue()
+    validity = try Validity(notBefore: c[7]!.unsignedValue(), expiresAt: c[8]!.unsignedValue())
+    data = try c[9]!.bytesValue()
     guard revision > 0, revision <= UInt64(Int64.max),
       previous.count == (revision == 1 ? 0 : 32)
     else { throw .invalidEncoding }
@@ -85,10 +88,10 @@ public struct Profile: Hashable, Sendable {
 
   /// The canonical encoding.
   public var encoding: [UInt8] {
-    CBOR.array([
-      .text("Diem/profile"), .unsigned(3), .bytes(identityKey.key.encoding),
-      .array(devices.map { .bytes($0.encoding) }), .bytes(content.encoding),
-    ]).encoded
+    CBOR.record([
+      0: .text("Diem/profile"), 1: .unsigned(3), 2: .bytes(identityKey.key.encoding),
+      3: .array(devices.map { .bytes($0.encoding) }), 4: .bytes(content.encoding),
+    ], extensions: extensionFields).encoded
   }
 
   /// The listed device with `id`, if any.
@@ -112,11 +115,11 @@ public struct Profile: Hashable, Sendable {
     revision: UInt64, previousDigest: Digest?, validity: Validity, data: [UInt8]
   ) async throws -> Self {
     guard let generation = devices.first?.generation else { throw DiemError.deviceNotListed }
-    let message = CBOR.array([
-      .text("Diem/profile-content"), .unsigned(3), .bytes(identityKey.id.bytes),
-      .unsigned(generation), .bytes(signer.publicKey.id.bytes), .unsigned(revision),
-      .bytes(previousDigest?.bytes ?? []), .unsigned(validity.notBefore),
-      .unsigned(validity.expiresAt), .bytes(data),
+    let message = CBOR.record([
+      0: .text("Diem/profile-content"), 1: .unsigned(3), 2: .bytes(identityKey.id.bytes),
+      3: .unsigned(generation), 4: .bytes(signer.publicKey.id.bytes), 5: .unsigned(revision),
+      6: .bytes(previousDigest?.bytes ?? []), 7: .unsigned(validity.notBefore),
+      8: .unsigned(validity.expiresAt), 9: .bytes(data),
     ]).encoded
     return try Self(
       identityKey: identityKey, devices: devices,

@@ -17265,7 +17265,7 @@ Error: %8$@";
 "blah.Identity.DeviceDays" = "Device validity (days)";
 "blah.Identity.Renew" = "Renew now";
 "blah.Identity.RemoveDomain" = "Remove domain";
-"blah.Identity.UsernameNotice" = "Domain switches mark public usernames. Publish changes at every domain, then request a profile check from your DC.";
+"blah.Identity.UsernameNotice" = "Every domain is a username candidate. Publish changes at every domain, then request a profile check from your DC. Activate verified domains in Edit Profile.";
 "blah.Identity.AddDomain" = "Add profile domain";
 "blah.Identity.ThisDevice" = "This device";
 "blah.Identity.RevokeDevice" = "Revoke device";

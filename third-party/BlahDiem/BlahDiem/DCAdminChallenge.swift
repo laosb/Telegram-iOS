@@ -13,6 +13,8 @@ public struct DCAdminChallenge: BlahStatement {
 
   public static let maximumDocumentBytes = 131_072
 
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let dc: DCAddress
   public let nonce: [UInt8]
   public let expiresAt: UInt64
@@ -42,20 +44,21 @@ public struct DCAdminChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .dcAdmin, count: 9, error: e)
-    guard let operation = Operation(rawValue: try a[6].unsigned(e)) else { throw e }
+    let a = try CBOR.record(encoding, tag: .dcAdmin, requiredKeys: 0..<9, error: e)
+    guard let operation = Operation(rawValue: try a[6]!.unsigned(e)) else { throw e }
     try self.init(
-      dc: DCAddress(domain: a[2].text(e), id: a[3].digest(e)), nonce: a[4].bytes(e),
-      expiresAt: a[5].unsigned(e), operation: operation, revision: a[7].unsigned(e),
-      document: a[8].bytes(e))
+      dc: DCAddress(domain: a[2]!.text(e), id: a[3]!.digest(e)), nonce: a[4]!.bytes(e),
+      expiresAt: a[5]!.unsigned(e), operation: operation, revision: a[7]!.unsigned(e),
+      document: a[8]!.bytes(e))
+    extensionFields = a.filter { $0.key >= 9 }
   }
 
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.dcAdmin.rawValue), .unsigned(1), .text(dc.domain), .bytes(dc.id.bytes),
-      .bytes(nonce), .unsigned(expiresAt), .unsigned(operation.rawValue), .unsigned(revision),
-      .bytes(document),
-    ]).encoded
+    CBOR.record([
+      0: .unsigned(BlahTag.dcAdmin.rawValue), 1: .unsigned(1), 2: .text(dc.domain), 3: .bytes(dc.id.bytes),
+      4: .bytes(nonce), 5: .unsigned(expiresAt), 6: .unsigned(operation.rawValue), 7: .unsigned(revision),
+      8: .bytes(document),
+    ], extensions: extensionFields).encoded
   }
 
   /// Requires a live challenge from the identity's home DC.

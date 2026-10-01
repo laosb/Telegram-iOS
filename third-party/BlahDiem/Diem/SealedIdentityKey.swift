@@ -1,5 +1,7 @@
 /// An identity private key encrypted to one encryption key, for storage or transfer.
 public struct SealedIdentityKey: Hashable, Sendable {
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let identityKey: IdentityPublicKey
   /// The key that can open this box.
   public let recipient: EncryptionPublicKey
@@ -7,21 +9,22 @@ public struct SealedIdentityKey: Hashable, Sendable {
 
   /// Decodes a sealed key from its ``encoding``.
   public init(encoding: [UInt8]) throws(DiemError) {
-    let a = try CBOR(decoding: encoding).arrayValue(count: 6)
-    guard a[0] == .text("Diem/sealed-identity-key"), a[1] == .unsigned(3) else {
+    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<6)
+    guard a[0]! == .text("Diem/sealed-identity-key"), a[1]! == .unsigned(3) else {
       throw .invalidEncoding
     }
-    identityKey = try IdentityPublicKey(PublicKey(encoding: a[2].bytesValue()))
-    recipient = try EncryptionPublicKey(encoding: a[3].bytesValue())
-    box = try SealedBox(encapsulatedKey: a[4].bytesValue(), ciphertext: a[5].bytesValue())
+    identityKey = try IdentityPublicKey(PublicKey(encoding: a[2]!.bytesValue()))
+    recipient = try EncryptionPublicKey(encoding: a[3]!.bytesValue())
+    box = try SealedBox(encapsulatedKey: a[4]!.bytesValue(), ciphertext: a[5]!.bytesValue())
+    extensionFields = a.filter { $0.key >= 6 }
   }
 
   /// The canonical encoding.
   public var encoding: [UInt8] {
-    CBOR.array([
-      .text("Diem/sealed-identity-key"), .unsigned(3), .bytes(identityKey.key.encoding),
-      .bytes(recipient.encoding), .bytes(box.encapsulatedKey), .bytes(box.ciphertext),
-    ]).encoded
+    CBOR.record([
+      0: .text("Diem/sealed-identity-key"), 1: .unsigned(3), 2: .bytes(identityKey.key.encoding),
+      3: .bytes(recipient.encoding), 4: .bytes(box.encapsulatedKey), 5: .bytes(box.ciphertext),
+    ], extensions: extensionFields).encoded
   }
 
   /// The identity private key, decrypted with the recipient's `key`.
@@ -46,9 +49,9 @@ public struct SealedIdentityKey: Hashable, Sendable {
   fileprivate static func context(identityKey: IdentityPublicKey, recipient: EncryptionPublicKey)
     -> [UInt8]
   {
-    CBOR.array([
-      .text("Diem/sealed-identity-key"), .unsigned(3), .bytes(identityKey.key.encoding),
-      .bytes(recipient.encoding),
+    CBOR.record([
+      0: .text("Diem/sealed-identity-key"), 1: .unsigned(3), 2: .bytes(identityKey.key.encoding),
+      3: .bytes(recipient.encoding),
     ]).encoded
   }
 }

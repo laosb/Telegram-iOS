@@ -1,4 +1,4 @@
-/// Leading tags of Blah records. The fields after a tag and its version are fixed positions.
+/// Tags of Blah records, stored at integer key 0; key 1 holds the version.
 enum BlahTag: UInt64 {
   case login = 3
   case invocationChallenge = 4
@@ -21,13 +21,17 @@ enum ProfileKind: UInt64 {
 
 /// Decoding helpers that map Diem encoding errors to one Blah error.
 extension CBOR {
-  static func record(_ bytes: [UInt8], tag: BlahTag, count: Int?, error: BlahError)
-    throws(BlahError) -> [CBOR]
+  static func record(_ bytes: [UInt8], tag: BlahTag, requiredKeys: Range<UInt64>, error: BlahError)
+    throws(BlahError) -> [UInt64: CBOR]
   {
-    guard let fields = try? CBOR(decoding: bytes).arrayValue(count: count), fields.count >= 3,
+    guard let fields = try? CBOR(decoding: bytes).recordValue(requiredKeys: requiredKeys),
       fields[0] == .unsigned(tag.rawValue), fields[1] == .unsigned(1)
     else { throw error }
     return fields
+  }
+
+  func record(_ error: BlahError, requiredKeys: Range<UInt64>) throws(BlahError) -> [UInt64: CBOR] {
+    try field(error) { value throws(DiemError) in try value.recordValue(requiredKeys: requiredKeys) }
   }
 
   func field<T>(_ failure: BlahError, _ read: (CBOR) throws(DiemError) -> T) throws(BlahError) -> T {

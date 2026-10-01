@@ -11,6 +11,8 @@ public struct AccountLinkChallenge: BlahStatement {
     case unlink = 4
   }
 
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let dc: DCAddress
   public let nonce: [UInt8]
   public let expiresAt: UInt64
@@ -59,30 +61,31 @@ public struct AccountLinkChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .accountLink, count: 13, error: e)
-    guard let operation = Operation(rawValue: try a[6].unsigned(e)), a[7] == .unsigned(1) else {
+    let a = try CBOR.record(encoding, tag: .accountLink, requiredKeys: 0..<13, error: e)
+    guard let operation = Operation(rawValue: try a[6]!.unsigned(e)), a[7]! == .unsigned(1) else {
       throw e
     }
     func text(_ value: CBOR) throws(BlahError) -> String? {
       let text = try value.text(e)
       return text.isEmpty ? nil : text
     }
-    let identity = try a[8].bytes(e)
-    let request = try a[9].bytes(e)
+    let identity = try a[8]!.bytes(e)
+    let request = try a[9]!.bytes(e)
     try self.init(
-      dc: DCAddress(domain: a[2].text(e), id: a[3].digest(e)), nonce: a[4].bytes(e),
-      expiresAt: a[5].unsigned(e), operation: operation,
-      identityID: identity.isEmpty ? nil : a[8].digest(e), requestID: request.isEmpty ? nil : request,
-      externalID: text(a[10]), previousExternalID: text(a[11]), label: text(a[12]))
+      dc: DCAddress(domain: a[2]!.text(e), id: a[3]!.digest(e)), nonce: a[4]!.bytes(e),
+      expiresAt: a[5]!.unsigned(e), operation: operation,
+      identityID: identity.isEmpty ? nil : a[8]!.digest(e), requestID: request.isEmpty ? nil : request,
+      externalID: text(a[10]!), previousExternalID: text(a[11]!), label: text(a[12]!))
+    extensionFields = a.filter { $0.key >= 13 }
   }
 
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.accountLink.rawValue), .unsigned(1), .text(dc.domain), .bytes(dc.id.bytes),
-      .bytes(nonce), .unsigned(expiresAt), .unsigned(operation.rawValue), .unsigned(1),
-      .bytes(identityID?.bytes ?? []), .bytes(requestID ?? []), .text(externalID ?? ""),
-      .text(previousExternalID ?? ""), .text(label ?? ""),
-    ]).encoded
+    CBOR.record([
+      0: .unsigned(BlahTag.accountLink.rawValue), 1: .unsigned(1), 2: .text(dc.domain), 3: .bytes(dc.id.bytes),
+      4: .bytes(nonce), 5: .unsigned(expiresAt), 6: .unsigned(operation.rawValue), 7: .unsigned(1),
+      8: .bytes(identityID?.bytes ?? []), 9: .bytes(requestID ?? []), 10: .text(externalID ?? ""),
+      11: .text(previousExternalID ?? ""), 12: .text(label ?? ""),
+    ], extensions: extensionFields).encoded
   }
 
   /// Requires a live challenge from the identity's home DC, naming this identity if any.

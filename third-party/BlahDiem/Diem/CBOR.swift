@@ -75,6 +75,25 @@ public indirect enum CBOR: Hashable, Sendable {
     return value
   }
 
+  /// An extensible record with unsigned integer keys. Required fields must be present;
+  /// unknown integer keys are retained so callers can preserve the original record.
+  public func recordValue(requiredKeys: Range<UInt64>) throws(DiemError) -> [UInt64: CBOR] {
+    let entries = try mapValue()
+    var fields: [UInt64: CBOR] = [:]
+    for (key, value) in entries {
+      fields[try key.unsignedValue()] = value
+    }
+    guard requiredKeys.allSatisfy({ fields[$0] != nil }) else { throw .invalidEncoding }
+    return fields
+  }
+
+  /// Encodes a record, retaining unrecognized fields from a decoded record.
+  /// Explicit fields take precedence over extensions.
+  public static func record(_ fields: [UInt64: CBOR], extensions: [UInt64: CBOR] = [:]) -> CBOR {
+    .map(Dictionary(uniqueKeysWithValues: extensions.merging(fields) { _, known in known }
+      .map { (.unsigned($0.key), $0.value) }))
+  }
+
   private func append(to output: inout [UInt8]) {
     func head(_ major: UInt8, _ n: UInt64) {
       if n < 24 {

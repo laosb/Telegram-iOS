@@ -1,10 +1,10 @@
 {
   "Diem": {
     "repository": "https://github.com/UInt8Co/diem",
-    "revision": "f86ee57b9383ec59a9494d06c39b94487ef71d1d"
+    "revision": "9434ead3e880f7daaf5ffd8ce63b59a220930fb9"
   },
   "BlahDiem": {
     "repository": "https://github.com/UInt8Co/BlahDiem",
-    "revision": "f9c52e884f846b5ff15c457c5847b24e807ab404"
+    "revision": "f0a7b85cd2c5936c6d6d0f3edabe9fbcaf504dbf"
   }
 }

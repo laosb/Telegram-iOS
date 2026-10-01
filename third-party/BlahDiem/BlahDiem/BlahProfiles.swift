@@ -52,14 +52,14 @@ public struct UserProfile: BlahProfile {
     try HostedRecord.encode(kind: .user, home: home, domains: domains)
   }
 
-  /// The public name: the domain flagged as username.
+  /// The first domain. Setting this replaces the domain list with that one name.
   public var username: String? {
     get { domains.username }
     set { domains.username = newValue }
   }
 }
 
-/// A bot's profile. Its username's first label ends in `bot`.
+/// A bot's profile.
 public struct BotProfile: BlahProfile {
   public var home: Home?
   /// The domains that serve this profile.
@@ -78,7 +78,7 @@ public struct BotProfile: BlahProfile {
     try HostedRecord.encode(kind: .bot, home: home, domains: domains)
   }
 
-  /// The public name: the domain flagged as username.
+  /// The first domain. Setting this replaces the domain list with that one name.
   public var username: String? {
     get { domains.username }
     set { domains.username = newValue }
@@ -104,7 +104,7 @@ public struct ChannelProfile: BlahProfile {
     try HostedRecord.encode(kind: .channel, home: home, domains: domains)
   }
 
-  /// The public name: the domain flagged as username.
+  /// The first domain. Setting this replaces the domain list with that one name.
   public var username: String? {
     get { domains.username }
     set { domains.username = newValue }
@@ -130,7 +130,7 @@ public struct StickerSetProfile: BlahProfile {
 
   public func encoded() throws(BlahError) -> [UInt8] {
     try HostedRecord.encode(
-      kind: .stickerSet, home: home, domains: [ProfileDomain(shortName, isUsername: true)])
+      kind: .stickerSet, home: home, domains: [ProfileDomain(shortName)])
   }
 }
 
@@ -144,8 +144,8 @@ public enum AnyBlahProfile: Hashable, Sendable {
 
   /// Decodes the Blah data of `profile`.
   public init(_ profile: Profile) throws(BlahError) {
-    let fields = try CBOR.record(profile.data, tag: .profile, count: nil, error: .invalidProfile)
-    switch ProfileKind(rawValue: try fields[2].unsigned(.invalidProfile)) {
+    let fields = try CBOR.record(profile.data, tag: .profile, requiredKeys: 0..<3, error: .invalidProfile)
+    switch ProfileKind(rawValue: try fields[2]!.unsigned(.invalidProfile)) {
     case .user: self = .user(try UserProfile(profile))
     case .bot: self = .bot(try BotProfile(profile))
     case .channel: self = .channel(try ChannelProfile(profile))
@@ -180,16 +180,14 @@ public enum AnyBlahProfile: Hashable, Sendable {
 
 extension [ProfileDomain] {
   fileprivate var username: String? {
-    get { first(where: { $0.isUsername })?.name }
+    get { first?.name }
     set {
-      removeAll { $0.isUsername || $0.name == newValue }
-      if let newValue { append(ProfileDomain(unchecked: newValue, isUsername: true)) }
+      self = newValue.map { [ProfileDomain(unchecked: $0)] } ?? []
     }
   }
 }
 
-/// Wire layout shared by hosted identities:
-/// `[tag, 1, kind, [dc, epoch, expiresAt, account | null] | null, [[domain, isUsername]]]`.
+/// Integer-keyed profile and home records; domains are a list of domain records.
 enum HostedRecord {
   static let maximumDomains = 16
 
@@ -198,14 +196,14 @@ enum HostedRecord {
   {
     try validate(kind: kind, home: home, domains: domains)
     let homeValue: CBOR = home.map {
-      .array([
-        .bytes($0.dc.bytes), .unsigned($0.epoch), .unsigned($0.expiresAt),
-        $0.account.map { .unsigned(UInt64($0)) } ?? .null,
+      .record([
+        0: .bytes($0.dc.bytes), 1: .unsigned($0.epoch), 2: .unsigned($0.expiresAt),
+        3: $0.account.map { .unsigned(UInt64($0)) } ?? .null,
       ])
     } ?? .null
-    return CBOR.array([
-      .unsigned(BlahTag.profile.rawValue), .unsigned(1), .unsigned(kind.rawValue), homeValue,
-      .array(domains.map { .array([.text($0.name), .bool($0.isUsername)]) }),
+    return CBOR.record([
+      0: .unsigned(BlahTag.profile.rawValue), 1: .unsigned(1), 2: .unsigned(kind.rawValue), 3: homeValue,
+      4: .array(domains.map { .record([0: .text($0.name)]) }),
     ]).encoded
   }
 
@@ -213,20 +211,19 @@ enum HostedRecord {
     -> (Home?, [ProfileDomain])
   {
     let e = BlahError.invalidProfile
-    let fields = try CBOR.record(data, tag: .profile, count: 5, error: e)
-    guard fields[2] == .unsigned(kind.rawValue) else { throw e }
+    let fields = try CBOR.record(data, tag: .profile, requiredKeys: 0..<5, error: e)
+    guard fields[2]! == .unsigned(kind.rawValue) else { throw e }
     var home: Home?
-    if fields[3] != .null {
-      let h = try fields[3].array(e, count: 4)
+    if fields[3]! != .null {
+      let h = try fields[3]!.record(e, requiredKeys: 0..<4)
       home = Home(
-        dc: try h[0].digest(e), epoch: try h[1].unsigned(e), expiresAt: try h[2].unsigned(e),
-        account: h[3] == .null ? nil : Int64(exactly: try h[3].unsigned(e)) ?? 0)
+        dc: try h[0]!.digest(e), epoch: try h[1]!.unsigned(e), expiresAt: try h[2]!.unsigned(e),
+        account: h[3]! == .null ? nil : Int64(exactly: try h[3]!.unsigned(e)) ?? 0)
     }
     var domains: [ProfileDomain] = []
-    for entry in try fields[4].array(e) {
-      let pair = try entry.array(e, count: 2)
-      guard case .bool(let isUsername) = pair[1] else { throw e }
-      domains.append(try ProfileDomain(pair[0].text(e), isUsername: isUsername))
+    for entry in try fields[4]!.array(e) {
+      let domain = try entry.record(e, requiredKeys: 0..<1)
+      domains.append(try ProfileDomain(domain[0]!.text(e)))
     }
     try validate(kind: kind, home: home, domains: domains)
     return (home, domains)
@@ -244,17 +241,12 @@ enum HostedRecord {
         home.account.map({ $0 > 0 && $0 < accountLimit }) ?? true
       else { throw .invalidProfile }
     }
-    let usernames = domains.filter { $0.isUsername }
     guard domains.count <= maximumDomains, Set(domains.map { $0.name }).count == domains.count,
       domains.allSatisfy({ DomainName.isValid($0.name) })
     else { throw .invalidName }
     switch kind {
     case .stickerSet:
-      guard domains.count == 1, usernames.count == 1 else { throw .invalidName }
-    case .bot:
-      guard usernames.allSatisfy({ $0.name.utf8.split(separator: 46)[0].suffix(3).elementsEqual("bot".utf8) }) else {
-        throw .invalidName
-      }
+      guard domains.count == 1 else { throw .invalidName }
     default: break
     }
   }

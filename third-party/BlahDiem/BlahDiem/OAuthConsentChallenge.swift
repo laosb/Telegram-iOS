@@ -2,6 +2,8 @@
 ///
 /// The device signs it only when it equals the app and permissions the user reviewed.
 public struct OAuthConsentChallenge: BlahStatement {
+  private var extensionFields: [UInt64: CBOR] = [:]
+
   public let dc: DCAddress
   public let nonce: [UInt8]
   public let expiresAt: UInt64
@@ -48,23 +50,24 @@ public struct OAuthConsentChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .oauthConsent, count: 14, error: e)
+    let a = try CBOR.record(encoding, tag: .oauthConsent, requiredKeys: 0..<14, error: e)
     var scopes: [String] = []
-    for scope in try a[10].array(e) { scopes.append(try scope.text(e)) }
+    for scope in try a[10]!.array(e) { scopes.append(try scope.text(e)) }
     try self.init(
-      dc: DCAddress(domain: a[2].text(e), id: a[3].digest(e)), nonce: a[4].bytes(e),
-      expiresAt: a[5].unsigned(e), appID: a[6].unsigned(e), appName: a[7].text(e),
-      appVersion: a[8].unsigned(e), redirectURI: a[9].text(e), scopes: scopes,
-      codeChallenge: a[11].text(e), state: a[12].text(e), oidcNonce: a[13].text(e))
+      dc: DCAddress(domain: a[2]!.text(e), id: a[3]!.digest(e)), nonce: a[4]!.bytes(e),
+      expiresAt: a[5]!.unsigned(e), appID: a[6]!.unsigned(e), appName: a[7]!.text(e),
+      appVersion: a[8]!.unsigned(e), redirectURI: a[9]!.text(e), scopes: scopes,
+      codeChallenge: a[11]!.text(e), state: a[12]!.text(e), oidcNonce: a[13]!.text(e))
+    extensionFields = a.filter { $0.key >= 14 }
   }
 
   public var encoding: [UInt8] {
-    CBOR.array([
-      .unsigned(BlahTag.oauthConsent.rawValue), .unsigned(1), .text(dc.domain), .bytes(dc.id.bytes),
-      .bytes(nonce), .unsigned(expiresAt), .unsigned(appID), .text(appName),
-      .unsigned(appVersion), .text(redirectURI), .array(scopes.map(CBOR.text)),
-      .text(codeChallenge), .text(state), .text(oidcNonce),
-    ]).encoded
+    CBOR.record([
+      0: .unsigned(BlahTag.oauthConsent.rawValue), 1: .unsigned(1), 2: .text(dc.domain), 3: .bytes(dc.id.bytes),
+      4: .bytes(nonce), 5: .unsigned(expiresAt), 6: .unsigned(appID), 7: .text(appName),
+      8: .unsigned(appVersion), 9: .text(redirectURI), 10: .array(scopes.map(CBOR.text)),
+      11: .text(codeChallenge), 12: .text(state), 13: .text(oidcNonce),
+    ], extensions: extensionFields).encoded
   }
 
   /// Requires a live challenge from the identity's home DC.
