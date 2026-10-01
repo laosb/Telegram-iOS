@@ -1,5 +1,13 @@
 /// An identity private key encrypted to one encryption key, for storage or transfer.
 public struct SealedIdentityKey: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = 0
+  public static let cborKeyVersion: UInt64 = 1
+  public static let cborKeyIdentityKey: UInt64 = 2
+  public static let cborKeyRecipient: UInt64 = 3
+  public static let cborKeyEncapsulatedKey: UInt64 = 4
+  public static let cborKeyCiphertext: UInt64 = 5
+
   private var extensionFields: [UInt64: CBOR] = [:]
 
   public let identityKey: IdentityPublicKey
@@ -9,22 +17,33 @@ public struct SealedIdentityKey: Hashable, Sendable {
 
   /// Decodes a sealed key from its ``encoding``.
   public init(encoding: [UInt8]) throws(DiemError) {
-    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<6)
-    guard a[0]! == .text("Diem/sealed-identity-key"), a[1]! == .unsigned(3) else {
+    let a = try CBOR(decoding: encoding).recordValue(
+      requiredKeys: Self.cborKeyTag..<(Self.cborKeyCiphertext + 1))
+    guard a[Self.cborKeyTag]! == .text("Diem/sealed-identity-key"),
+      a[Self.cborKeyVersion]! == .unsigned(3)
+    else {
       throw .invalidEncoding
     }
-    identityKey = try IdentityPublicKey(PublicKey(encoding: a[2]!.bytesValue()))
-    recipient = try EncryptionPublicKey(encoding: a[3]!.bytesValue())
-    box = try SealedBox(encapsulatedKey: a[4]!.bytesValue(), ciphertext: a[5]!.bytesValue())
-    extensionFields = a.filter { $0.key >= 6 }
+    identityKey = try IdentityPublicKey(
+      PublicKey(encoding: a[Self.cborKeyIdentityKey]!.bytesValue()))
+    recipient = try EncryptionPublicKey(encoding: a[Self.cborKeyRecipient]!.bytesValue())
+    box = try SealedBox(
+      encapsulatedKey: a[Self.cborKeyEncapsulatedKey]!.bytesValue(),
+      ciphertext: a[Self.cborKeyCiphertext]!.bytesValue())
+    extensionFields = a.filter { $0.key > Self.cborKeyCiphertext }
   }
 
   /// The canonical encoding.
   public var encoding: [UInt8] {
-    CBOR.record([
-      0: .text("Diem/sealed-identity-key"), 1: .unsigned(3), 2: .bytes(identityKey.key.encoding),
-      3: .bytes(recipient.encoding), 4: .bytes(box.encapsulatedKey), 5: .bytes(box.ciphertext),
-    ], extensions: extensionFields).encoded
+    CBOR.record(
+      [
+        Self.cborKeyTag: .text("Diem/sealed-identity-key"), Self.cborKeyVersion: .unsigned(3),
+        Self.cborKeyIdentityKey: .bytes(identityKey.key.encoding),
+        Self.cborKeyRecipient: .bytes(recipient.encoding),
+        Self.cborKeyEncapsulatedKey: .bytes(box.encapsulatedKey),
+        Self.cborKeyCiphertext: .bytes(box.ciphertext),
+      ], extensions: extensionFields
+    ).encoded
   }
 
   /// The identity private key, decrypted with the recipient's `key`.
@@ -50,8 +69,9 @@ public struct SealedIdentityKey: Hashable, Sendable {
     -> [UInt8]
   {
     CBOR.record([
-      0: .text("Diem/sealed-identity-key"), 1: .unsigned(3), 2: .bytes(identityKey.key.encoding),
-      3: .bytes(recipient.encoding),
+      Self.cborKeyTag: .text("Diem/sealed-identity-key"), Self.cborKeyVersion: .unsigned(3),
+      Self.cborKeyIdentityKey: .bytes(identityKey.key.encoding),
+      Self.cborKeyRecipient: .bytes(recipient.encoding),
     ]).encoded
   }
 }

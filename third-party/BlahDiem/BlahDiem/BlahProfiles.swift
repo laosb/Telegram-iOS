@@ -13,6 +13,12 @@ extension BlahProfile {
 
 /// The DC hosting an account, and the account it allocated there.
 public struct Home: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyDC: UInt64 = 0
+  public static let cborKeyEpoch: UInt64 = 1
+  public static let cborKeyExpiresAt: UInt64 = 2
+  public static let cborKeyAccount: UInt64 = 3
+
   /// The home DC's identity ID.
   public var dc: Digest
   /// The hosting's epoch. A later epoch is a new account.
@@ -35,6 +41,13 @@ public struct Home: Hashable, Sendable {
 
 /// A person's profile.
 public struct UserProfile: BlahProfile {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
+  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
+  public static let cborKeyKind: UInt64 = 2
+  public static let cborKeyHome: UInt64 = 3
+  public static let cborKeyDomains: UInt64 = 4
+
   public var home: Home?
   /// The domains that serve this profile.
   public var domains: [ProfileDomain]
@@ -61,6 +74,13 @@ public struct UserProfile: BlahProfile {
 
 /// A bot's profile.
 public struct BotProfile: BlahProfile {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
+  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
+  public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
+  public static let cborKeyDomains: UInt64 = UserProfile.cborKeyDomains
+
   public var home: Home?
   /// The domains that serve this profile.
   public var domains: [ProfileDomain]
@@ -87,6 +107,13 @@ public struct BotProfile: BlahProfile {
 
 /// A channel's or supergroup's profile.
 public struct ChannelProfile: BlahProfile {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
+  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
+  public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
+  public static let cborKeyDomains: UInt64 = UserProfile.cborKeyDomains
+
   public var home: Home?
   /// The domains that serve this profile.
   public var domains: [ProfileDomain]
@@ -113,6 +140,13 @@ public struct ChannelProfile: BlahProfile {
 
 /// A sticker or custom-emoji set's profile.
 public struct StickerSetProfile: BlahProfile {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
+  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
+  public static let cborKeyHome: UInt64 = UserProfile.cborKeyHome
+  public static let cborKeyDomains: UInt64 = UserProfile.cborKeyDomains
+
   public var home: Home?
   /// The set's short name: the one domain that serves this profile.
   public var shortName: String
@@ -136,6 +170,11 @@ public struct StickerSetProfile: BlahProfile {
 
 /// Any Blah profile, by kind.
 public enum AnyBlahProfile: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = UserProfile.cborKeyTag
+  public static let cborKeyVersion: UInt64 = UserProfile.cborKeyVersion
+  public static let cborKeyKind: UInt64 = UserProfile.cborKeyKind
+
   case user(UserProfile)
   case bot(BotProfile)
   case channel(ChannelProfile)
@@ -144,8 +183,10 @@ public enum AnyBlahProfile: Hashable, Sendable {
 
   /// Decodes the Blah data of `profile`.
   public init(_ profile: Profile) throws(BlahError) {
-    let fields = try CBOR.record(profile.data, tag: .profile, requiredKeys: 0..<3, error: .invalidProfile)
-    switch ProfileKind(rawValue: try fields[2]!.unsigned(.invalidProfile)) {
+    let fields = try CBOR.record(
+      profile.data, tag: .profile, requiredKeys: Self.cborKeyTag..<(Self.cborKeyKind + 1),
+      error: .invalidProfile)
+    switch ProfileKind(rawValue: try fields[Self.cborKeyKind]!.unsigned(.invalidProfile)) {
     case .user: self = .user(try UserProfile(profile))
     case .bot: self = .bot(try BotProfile(profile))
     case .channel: self = .channel(try ChannelProfile(profile))
@@ -195,15 +236,20 @@ enum HostedRecord {
     -> [UInt8]
   {
     try validate(kind: kind, home: home, domains: domains)
-    let homeValue: CBOR = home.map {
-      .record([
-        0: .bytes($0.dc.bytes), 1: .unsigned($0.epoch), 2: .unsigned($0.expiresAt),
-        3: $0.account.map { .unsigned(UInt64($0)) } ?? .null,
-      ])
-    } ?? .null
+    let homeValue: CBOR =
+      home.map {
+        .record([
+          Home.cborKeyDC: .bytes($0.dc.bytes), Home.cborKeyEpoch: .unsigned($0.epoch),
+          Home.cborKeyExpiresAt: .unsigned($0.expiresAt),
+          Home.cborKeyAccount: $0.account.map { .unsigned(UInt64($0)) } ?? .null,
+        ])
+      } ?? .null
     return CBOR.record([
-      0: .unsigned(BlahTag.profile.rawValue), 1: .unsigned(1), 2: .unsigned(kind.rawValue), 3: homeValue,
-      4: .array(domains.map { .record([0: .text($0.name)]) }),
+      UserProfile.cborKeyTag: .unsigned(BlahTag.profile.rawValue),
+      UserProfile.cborKeyVersion: .unsigned(1), UserProfile.cborKeyKind: .unsigned(kind.rawValue),
+      UserProfile.cborKeyHome: homeValue,
+      UserProfile.cborKeyDomains: .array(
+        domains.map { .record([ProfileDomain.cborKeyName: .text($0.name)]) }),
     ]).encoded
   }
 
@@ -211,19 +257,25 @@ enum HostedRecord {
     -> (Home?, [ProfileDomain])
   {
     let e = BlahError.invalidProfile
-    let fields = try CBOR.record(data, tag: .profile, requiredKeys: 0..<5, error: e)
-    guard fields[2]! == .unsigned(kind.rawValue) else { throw e }
+    let fields = try CBOR.record(
+      data, tag: .profile, requiredKeys: UserProfile.cborKeyTag..<(UserProfile.cborKeyDomains + 1),
+      error: e)
+    guard fields[UserProfile.cborKeyKind]! == .unsigned(kind.rawValue) else { throw e }
     var home: Home?
-    if fields[3]! != .null {
-      let h = try fields[3]!.record(e, requiredKeys: 0..<4)
+    if fields[UserProfile.cborKeyHome]! != .null {
+      let h = try fields[UserProfile.cborKeyHome]!.record(
+        e, requiredKeys: Home.cborKeyDC..<(Home.cborKeyAccount + 1))
       home = Home(
-        dc: try h[0]!.digest(e), epoch: try h[1]!.unsigned(e), expiresAt: try h[2]!.unsigned(e),
-        account: h[3]! == .null ? nil : Int64(exactly: try h[3]!.unsigned(e)) ?? 0)
+        dc: try h[Home.cborKeyDC]!.digest(e), epoch: try h[Home.cborKeyEpoch]!.unsigned(e),
+        expiresAt: try h[Home.cborKeyExpiresAt]!.unsigned(e),
+        account: h[Home.cborKeyAccount]! == .null
+          ? nil : Int64(exactly: try h[Home.cborKeyAccount]!.unsigned(e)) ?? 0)
     }
     var domains: [ProfileDomain] = []
-    for entry in try fields[4]!.array(e) {
-      let domain = try entry.record(e, requiredKeys: 0..<1)
-      domains.append(try ProfileDomain(domain[0]!.text(e)))
+    for entry in try fields[UserProfile.cborKeyDomains]!.array(e) {
+      let domain = try entry.record(
+        e, requiredKeys: ProfileDomain.cborKeyName..<(ProfileDomain.cborKeyName + 1))
+      domains.append(try ProfileDomain(domain[ProfileDomain.cborKeyName]!.text(e)))
     }
     try validate(kind: kind, home: home, domains: domains)
     return (home, domains)

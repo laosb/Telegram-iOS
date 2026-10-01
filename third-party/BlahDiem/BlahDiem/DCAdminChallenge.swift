@@ -2,6 +2,17 @@
 ///
 /// The device signs it only when it equals the request the user reviewed.
 public struct DCAdminChallenge: BlahStatement {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
+  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
+  public static let cborKeyDCDomain: UInt64 = 2
+  public static let cborKeyDCID: UInt64 = 3
+  public static let cborKeyNonce: UInt64 = 4
+  public static let cborKeyExpiresAt: UInt64 = 5
+  public static let cborKeyOperation: UInt64 = 6
+  public static let cborKeyRevision: UInt64 = 7
+  public static let cborKeyDocument: UInt64 = 8
+
   public enum Operation: UInt64, Hashable, Sendable {
     /// Reads the administration document.
     case read = 1
@@ -44,21 +55,31 @@ public struct DCAdminChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .dcAdmin, requiredKeys: 0..<9, error: e)
-    guard let operation = Operation(rawValue: try a[6]!.unsigned(e)) else { throw e }
+    let a = try CBOR.record(
+      encoding, tag: .dcAdmin, requiredKeys: Self.cborKeyTag..<(Self.cborKeyDocument + 1), error: e)
+    guard let operation = Operation(rawValue: try a[Self.cborKeyOperation]!.unsigned(e)) else {
+      throw e
+    }
     try self.init(
-      dc: DCAddress(domain: a[2]!.text(e), id: a[3]!.digest(e)), nonce: a[4]!.bytes(e),
-      expiresAt: a[5]!.unsigned(e), operation: operation, revision: a[7]!.unsigned(e),
-      document: a[8]!.bytes(e))
-    extensionFields = a.filter { $0.key >= 9 }
+      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      nonce: a[Self.cborKeyNonce]!.bytes(e),
+      expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), operation: operation,
+      revision: a[Self.cborKeyRevision]!.unsigned(e),
+      document: a[Self.cborKeyDocument]!.bytes(e))
+    extensionFields = a.filter { $0.key > Self.cborKeyDocument }
   }
 
   public var encoding: [UInt8] {
-    CBOR.record([
-      0: .unsigned(BlahTag.dcAdmin.rawValue), 1: .unsigned(1), 2: .text(dc.domain), 3: .bytes(dc.id.bytes),
-      4: .bytes(nonce), 5: .unsigned(expiresAt), 6: .unsigned(operation.rawValue), 7: .unsigned(revision),
-      8: .bytes(document),
-    ], extensions: extensionFields).encoded
+    CBOR.record(
+      [
+        Self.cborKeyTag: .unsigned(BlahTag.dcAdmin.rawValue), Self.cborKeyVersion: .unsigned(1),
+        Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+        Self.cborKeyNonce: .bytes(nonce), Self.cborKeyExpiresAt: .unsigned(expiresAt),
+        Self.cborKeyOperation: .unsigned(operation.rawValue),
+        Self.cborKeyRevision: .unsigned(revision),
+        Self.cborKeyDocument: .bytes(document),
+      ], extensions: extensionFields
+    ).encoded
   }
 
   /// Requires a live challenge from the identity's home DC.

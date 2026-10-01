@@ -3,6 +3,15 @@
 /// Certificates of one ``generation`` form the identity's device set. A profile lists
 /// certificates of a single generation.
 public struct DeviceCertificate: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = 0
+  public static let cborKeyVersion: UInt64 = 1
+  public static let cborKeyIdentityID: UInt64 = 2
+  public static let cborKeyGeneration: UInt64 = 3
+  public static let cborKeyDevice: UInt64 = 4
+  public static let cborKeyNotBefore: UInt64 = 5
+  public static let cborKeyExpiresAt: UInt64 = 6
+
   /// Default certificate lifetime. Applications may choose a different interval.
   public static let defaultLifetime: UInt64 = 30 * 24 * 60 * 60
   /// The wire timestamp bound. The identity owner chooses certificate validity.
@@ -17,13 +26,17 @@ public struct DeviceCertificate: Hashable, Sendable {
 
   /// Decodes a certificate from the identity's signed message.
   public init(_ signedMessage: SignedMessage) throws(DiemError) {
-    let a = try CBOR(decoding: signedMessage.message).recordValue(requiredKeys: 0..<7)
-    guard a[0]! == .text("Diem/device"), a[1]! == .unsigned(3) else { throw .invalidEncoding }
-    identityID = try Digest(bytes: a[2]!.bytesValue())
-    generation = try a[3]!.unsignedValue()
+    let a = try CBOR(decoding: signedMessage.message).recordValue(
+      requiredKeys: Self.cborKeyTag..<(Self.cborKeyExpiresAt + 1))
+    guard a[Self.cborKeyTag]! == .text("Diem/device"), a[Self.cborKeyVersion]! == .unsigned(3)
+    else { throw .invalidEncoding }
+    identityID = try Digest(bytes: a[Self.cborKeyIdentityID]!.bytesValue())
+    generation = try a[Self.cborKeyGeneration]!.unsignedValue()
     guard generation > 0, generation <= UInt64(Int64.max) else { throw .invalidEncoding }
-    device = try DevicePublicKey(PublicKey(encoding: a[4]!.bytesValue()))
-    validity = try Validity(notBefore: a[5]!.unsignedValue(), expiresAt: a[6]!.unsignedValue())
+    device = try DevicePublicKey(PublicKey(encoding: a[Self.cborKeyDevice]!.bytesValue()))
+    validity = try Validity(
+      notBefore: a[Self.cborKeyNotBefore]!.unsignedValue(),
+      expiresAt: a[Self.cborKeyExpiresAt]!.unsignedValue())
     self.signedMessage = signedMessage
   }
 
@@ -40,9 +53,12 @@ public struct DeviceCertificate: Hashable, Sendable {
     validity: Validity
   ) async throws -> Self {
     let message = CBOR.record([
-      0: .text("Diem/device"), 1: .unsigned(3), 2: .bytes(identityKey.publicKey.id.bytes),
-      3: .unsigned(generation), 4: .bytes(device.key.encoding), 5: .unsigned(validity.notBefore),
-      6: .unsigned(validity.expiresAt),
+      Self.cborKeyTag: .text("Diem/device"), Self.cborKeyVersion: .unsigned(3),
+      Self.cborKeyIdentityID: .bytes(identityKey.publicKey.id.bytes),
+      Self.cborKeyGeneration: .unsigned(generation),
+      Self.cborKeyDevice: .bytes(device.key.encoding),
+      Self.cborKeyNotBefore: .unsigned(validity.notBefore),
+      Self.cborKeyExpiresAt: .unsigned(validity.expiresAt),
     ]).encoded
     return try Self(await SignedMessage(signing: message, with: identityKey.key))
   }

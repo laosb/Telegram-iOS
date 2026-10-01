@@ -1,6 +1,25 @@
 /// An identity's public statement: its key, its certified devices, and application data
 /// signed by one of those devices.
 public struct Profile: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = 0
+  public static let cborKeyVersion: UInt64 = 1
+  public static let cborKeyIdentityKey: UInt64 = 2
+  public static let cborKeyDevices: UInt64 = 3
+  public static let cborKeyContent: UInt64 = 4
+
+  /// CBOR field keys in the signed content.
+  public static let cborKeyContentTag: UInt64 = 0
+  public static let cborKeyContentVersion: UInt64 = 1
+  public static let cborKeyContentIdentityID: UInt64 = 2
+  public static let cborKeyContentGeneration: UInt64 = 3
+  public static let cborKeyContentSignerID: UInt64 = 4
+  public static let cborKeyContentRevision: UInt64 = 5
+  public static let cborKeyContentPreviousDigest: UInt64 = 6
+  public static let cborKeyContentNotBefore: UInt64 = 7
+  public static let cborKeyContentExpiresAt: UInt64 = 8
+  public static let cborKeyContentData: UInt64 = 9
+
   private var extensionFields: [UInt64: CBOR] = [:]
 
   /// Default publishing lifetime. Applications may choose a different interval.
@@ -36,33 +55,43 @@ public struct Profile: Hashable, Sendable {
   /// Decodes a well-formed profile from its ``encoding``. ``verify(using:at:)`` checks its
   /// signatures and validity.
   public init(encoding: [UInt8]) throws(DiemError) {
-    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5)
-    guard a[0]! == .text("Diem/profile"), a[1]! == .unsigned(3) else { throw .invalidEncoding }
-    let certificates = try a[3]!.arrayValue()
+    let a = try CBOR(decoding: encoding).recordValue(
+      requiredKeys: Self.cborKeyTag..<(Self.cborKeyContent + 1))
+    guard a[Self.cborKeyTag]! == .text("Diem/profile"), a[Self.cborKeyVersion]! == .unsigned(3)
+    else { throw .invalidEncoding }
+    let certificates = try a[Self.cborKeyDevices]!.arrayValue()
     var devices: [DeviceCertificate] = []
     for certificate in certificates {
       devices.append(try DeviceCertificate(encoding: certificate.bytesValue()))
     }
     try self.init(
-      identityKey: IdentityPublicKey(PublicKey(encoding: a[2]!.bytesValue())), devices: devices,
-      content: SignedMessage(encoding: a[4]!.bytesValue()))
-    extensionFields = a.filter { $0.key >= 5 }
+      identityKey: IdentityPublicKey(PublicKey(encoding: a[Self.cborKeyIdentityKey]!.bytesValue())),
+      devices: devices,
+      content: SignedMessage(encoding: a[Self.cborKeyContent]!.bytesValue()))
+    extensionFields = a.filter { $0.key > Self.cborKeyContent }
   }
 
   private init(identityKey: IdentityPublicKey, devices: [DeviceCertificate], content: SignedMessage)
     throws(DiemError)
   {
-    let c = try CBOR(decoding: content.message).recordValue(requiredKeys: 0..<10)
-    guard c[0]! == .text("Diem/profile-content"), c[1]! == .unsigned(3) else {
+    let c = try CBOR(decoding: content.message).recordValue(
+      requiredKeys: Self.cborKeyContentTag..<(Self.cborKeyContentData + 1))
+    guard c[Self.cborKeyContentTag]! == .text("Diem/profile-content"),
+      c[Self.cborKeyContentVersion]! == .unsigned(3)
+    else {
       throw .invalidEncoding
     }
-    guard try Digest(bytes: c[2]!.bytesValue()) == identityKey.id else { throw .identityMismatch }
-    generation = try c[3]!.unsignedValue()
-    let signerID = try Digest(bytes: c[4]!.bytesValue())
-    revision = try c[5]!.unsignedValue()
-    let previous = try c[6]!.bytesValue()
-    validity = try Validity(notBefore: c[7]!.unsignedValue(), expiresAt: c[8]!.unsignedValue())
-    data = try c[9]!.bytesValue()
+    guard try Digest(bytes: c[Self.cborKeyContentIdentityID]!.bytesValue()) == identityKey.id else {
+      throw .identityMismatch
+    }
+    generation = try c[Self.cborKeyContentGeneration]!.unsignedValue()
+    let signerID = try Digest(bytes: c[Self.cborKeyContentSignerID]!.bytesValue())
+    revision = try c[Self.cborKeyContentRevision]!.unsignedValue()
+    let previous = try c[Self.cborKeyContentPreviousDigest]!.bytesValue()
+    validity = try Validity(
+      notBefore: c[Self.cborKeyContentNotBefore]!.unsignedValue(),
+      expiresAt: c[Self.cborKeyContentExpiresAt]!.unsignedValue())
+    data = try c[Self.cborKeyContentData]!.bytesValue()
     guard revision > 0, revision <= UInt64(Int64.max),
       previous.count == (revision == 1 ? 0 : 32)
     else { throw .invalidEncoding }
@@ -88,10 +117,14 @@ public struct Profile: Hashable, Sendable {
 
   /// The canonical encoding.
   public var encoding: [UInt8] {
-    CBOR.record([
-      0: .text("Diem/profile"), 1: .unsigned(3), 2: .bytes(identityKey.key.encoding),
-      3: .array(devices.map { .bytes($0.encoding) }), 4: .bytes(content.encoding),
-    ], extensions: extensionFields).encoded
+    CBOR.record(
+      [
+        Self.cborKeyTag: .text("Diem/profile"), Self.cborKeyVersion: .unsigned(3),
+        Self.cborKeyIdentityKey: .bytes(identityKey.key.encoding),
+        Self.cborKeyDevices: .array(devices.map { .bytes($0.encoding) }),
+        Self.cborKeyContent: .bytes(content.encoding),
+      ], extensions: extensionFields
+    ).encoded
   }
 
   /// The listed device with `id`, if any.
@@ -116,10 +149,16 @@ public struct Profile: Hashable, Sendable {
   ) async throws -> Self {
     guard let generation = devices.first?.generation else { throw DiemError.deviceNotListed }
     let message = CBOR.record([
-      0: .text("Diem/profile-content"), 1: .unsigned(3), 2: .bytes(identityKey.id.bytes),
-      3: .unsigned(generation), 4: .bytes(signer.publicKey.id.bytes), 5: .unsigned(revision),
-      6: .bytes(previousDigest?.bytes ?? []), 7: .unsigned(validity.notBefore),
-      8: .unsigned(validity.expiresAt), 9: .bytes(data),
+      Self.cborKeyContentTag: .text("Diem/profile-content"),
+      Self.cborKeyContentVersion: .unsigned(3),
+      Self.cborKeyContentIdentityID: .bytes(identityKey.id.bytes),
+      Self.cborKeyContentGeneration: .unsigned(generation),
+      Self.cborKeyContentSignerID: .bytes(signer.publicKey.id.bytes),
+      Self.cborKeyContentRevision: .unsigned(revision),
+      Self.cborKeyContentPreviousDigest: .bytes(previousDigest?.bytes ?? []),
+      Self.cborKeyContentNotBefore: .unsigned(validity.notBefore),
+      Self.cborKeyContentExpiresAt: .unsigned(validity.expiresAt),
+      Self.cborKeyContentData: .bytes(data),
     ]).encoded
     return try Self(
       identityKey: identityKey, devices: devices,

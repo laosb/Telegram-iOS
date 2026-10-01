@@ -1,5 +1,8 @@
 /// Tags of Blah records, stored at integer key 0; key 1 holds the version.
 enum BlahTag: UInt64 {
+  static let cborKeyTag: UInt64 = 0
+  static let cborKeyVersion: UInt64 = 1
+
   case login = 3
   case invocationChallenge = 4
   case invocationStatement = 5
@@ -25,7 +28,8 @@ extension CBOR {
     throws(BlahError) -> [UInt64: CBOR]
   {
     guard let fields = try? CBOR(decoding: bytes).recordValue(requiredKeys: requiredKeys),
-      fields[0] == .unsigned(tag.rawValue), fields[1] == .unsigned(1)
+      fields[BlahTag.cborKeyTag] == .unsigned(tag.rawValue),
+      fields[BlahTag.cborKeyVersion] == .unsigned(1)
     else { throw error }
     return fields
   }

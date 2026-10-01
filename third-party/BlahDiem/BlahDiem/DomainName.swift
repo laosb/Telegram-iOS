@@ -25,6 +25,9 @@ public enum DomainName {
 
 /// A domain that serves a profile and is a candidate for a public username.
 public struct ProfileDomain: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyName: UInt64 = 0
+
   public let name: String
   public init(_ name: String) throws(BlahError) {
     guard DomainName.isValid(name) else { throw .invalidName }

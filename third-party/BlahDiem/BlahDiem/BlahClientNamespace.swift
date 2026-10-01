@@ -1,6 +1,15 @@
 /// The boundary of a client's cached state for one account: one identity, hosted by one
 /// DC database generation in one home epoch.
 public struct ClientNamespace: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
+  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
+  public static let cborKeyIdentityID: UInt64 = 2
+  public static let cborKeyDCDomain: UInt64 = 3
+  public static let cborKeyDCID: UInt64 = 4
+  public static let cborKeyGeneration: UInt64 = 5
+  public static let cborKeyHomeEpoch: UInt64 = 6
+
   public let identityID: Digest
   public let dc: DCAddress
   /// The DC's database generation, pinned by the application.
@@ -23,8 +32,10 @@ public struct ClientNamespace: Hashable, Sendable {
   /// The canonical encoding.
   public var encoding: [UInt8] {
     CBOR.record([
-      0: .unsigned(BlahTag.clientNamespace.rawValue), 1: .unsigned(1), 2: .bytes(identityID.bytes),
-      3: .text(dc.domain), 4: .bytes(dc.id.bytes), 5: .unsigned(generation), 6: .unsigned(homeEpoch),
+      Self.cborKeyTag: .unsigned(BlahTag.clientNamespace.rawValue),
+      Self.cborKeyVersion: .unsigned(1), Self.cborKeyIdentityID: .bytes(identityID.bytes),
+      Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+      Self.cborKeyGeneration: .unsigned(generation), Self.cborKeyHomeEpoch: .unsigned(homeEpoch),
     ]).encoded
   }
 

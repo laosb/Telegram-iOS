@@ -8,6 +8,13 @@ public enum KeyProtection: Sendable, Hashable {
 
 /// A public signing key for one purpose.
 public struct PublicKey: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = 0
+  public static let cborKeyVersion: UInt64 = 1
+  public static let cborKeyPurpose: UInt64 = 2
+  public static let cborKeyAlgorithm: UInt64 = 3
+  public static let cborKeyRawRepresentation: UInt64 = 4
+
   /// What a signing key signs. Raw values are wire codes.
   ///
   /// A key serves exactly one purpose. Its ``PublicKey/encoding`` and ``PublicKey/id`` name
@@ -58,7 +65,9 @@ public struct PublicKey: Hashable, Sendable {
     guard let purpose = Purpose(rawValue: purposeCode), let algorithm = Algorithm(rawValue: code)
     else { throw .invalidKey }
     try self.init(purpose: purpose, algorithm: algorithm, rawRepresentation: raw)
-    extensionFields = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5).filter { $0.key >= 5 }
+    extensionFields = try CBOR(decoding: encoding).recordValue(
+      requiredKeys: Self.cborKeyTag..<(Self.cborKeyRawRepresentation + 1)
+    ).filter { $0.key > Self.cborKeyRawRepresentation }
   }
 
   /// The purpose- and algorithm-qualified canonical encoding.
@@ -101,6 +110,13 @@ public struct PrivateKey: Sendable {
 /// A public key that others encrypt to. Its encoding names the encryption purpose, so it is
 /// never read as a signing key.
 public struct EncryptionPublicKey: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = PublicKey.cborKeyTag
+  public static let cborKeyVersion: UInt64 = PublicKey.cborKeyVersion
+  public static let cborKeyPurpose: UInt64 = PublicKey.cborKeyPurpose
+  public static let cborKeyAlgorithm: UInt64 = PublicKey.cborKeyAlgorithm
+  public static let cborKeyRawRepresentation: UInt64 = PublicKey.cborKeyRawRepresentation
+
   /// An HPKE key-encapsulation algorithm. Raw values are wire codes.
   public enum Algorithm: UInt64, Hashable, Sendable, CaseIterable {
     /// X25519 with HKDF-SHA256 and ChaCha20-Poly1305. Not post-quantum.
@@ -137,7 +153,9 @@ public struct EncryptionPublicKey: Hashable, Sendable {
     guard purpose == KeyEncoding.encryptionPurpose, let algorithm = Algorithm(rawValue: code)
     else { throw .invalidKey }
     try self.init(algorithm: algorithm, rawRepresentation: raw)
-    extensionFields = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5).filter { $0.key >= 5 }
+    extensionFields = try CBOR(decoding: encoding).recordValue(
+      requiredKeys: Self.cborKeyTag..<(Self.cborKeyRawRepresentation + 1)
+    ).filter { $0.key > Self.cborKeyRawRepresentation }
   }
 
   /// The purpose- and algorithm-qualified canonical encoding.
@@ -190,15 +208,28 @@ public struct SealedBox: Hashable, Sendable {
 enum KeyEncoding {
   static let encryptionPurpose: UInt64 = 3
 
-  static func encode(_ purpose: UInt64, _ algorithm: UInt64, _ raw: [UInt8], extensions: [UInt64: CBOR]) -> [UInt8] {
-    CBOR.record([
-      0: .text("Diem/key"), 1: .unsigned(3), 2: .unsigned(purpose), 3: .unsigned(algorithm), 4: .bytes(raw),
-    ], extensions: extensions).encoded
+  static func encode(
+    _ purpose: UInt64, _ algorithm: UInt64, _ raw: [UInt8], extensions: [UInt64: CBOR]
+  ) -> [UInt8] {
+    CBOR.record(
+      [
+        PublicKey.cborKeyTag: .text("Diem/key"), PublicKey.cborKeyVersion: .unsigned(3),
+        PublicKey.cborKeyPurpose: .unsigned(purpose),
+        PublicKey.cborKeyAlgorithm: .unsigned(algorithm),
+        PublicKey.cborKeyRawRepresentation: .bytes(raw),
+      ], extensions: extensions
+    ).encoded
   }
 
   static func decode(_ encoding: [UInt8]) throws(DiemError) -> (UInt64, UInt64, [UInt8]) {
-    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<5)
-    guard a[0]! == .text("Diem/key"), a[1]! == .unsigned(3) else { throw .invalidKey }
-    return try (a[2]!.unsignedValue(), a[3]!.unsignedValue(), a[4]!.bytesValue())
+    let a = try CBOR(decoding: encoding).recordValue(
+      requiredKeys: PublicKey.cborKeyTag..<(PublicKey.cborKeyRawRepresentation + 1))
+    guard a[PublicKey.cborKeyTag]! == .text("Diem/key"),
+      a[PublicKey.cborKeyVersion]! == .unsigned(3)
+    else { throw .invalidKey }
+    return try (
+      a[PublicKey.cborKeyPurpose]!.unsignedValue(), a[PublicKey.cborKeyAlgorithm]!.unsignedValue(),
+      a[PublicKey.cborKeyRawRepresentation]!.bytesValue()
+    )
   }
 }

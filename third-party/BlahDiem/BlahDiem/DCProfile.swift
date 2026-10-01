@@ -1,5 +1,15 @@
 /// A DC's public profile: where clients and peer DCs reach it.
 public struct DCProfile: BlahProfile {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
+  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
+  public static let cborKeyKind: UInt64 = 2
+  public static let cborKeyDomains: UInt64 = 3
+  public static let cborKeyEndpoints: UInt64 = 4
+  public static let cborKeyBIDCOMEndpoints: UInt64 = 5
+  public static let cborKeyTransportPublicKey: UInt64 = 6
+  public static let cborKeyNamespaceGeneration: UInt64 = 7
+
   /// The transport carrying MTProto; TLS is independent of the transport.
   public enum Transport: UInt64, Sendable {
     case tcp = 0
@@ -8,6 +18,13 @@ public struct DCProfile: BlahProfile {
 
   /// A network address and, for WebSocket, its exact HTTP request path.
   public struct Endpoint: Hashable, Sendable {
+    /// CBOR field keys.
+    public static let cborKeyHost: UInt64 = 0
+    public static let cborKeyPort: UInt64 = 1
+    public static let cborKeyTLS: UInt64 = 2
+    public static let cborKeyTransport: UInt64 = 3
+    public static let cborKeyPath: UInt64 = 4
+
     public var host: String
     public var port: UInt16
     public var tls: Bool
@@ -50,43 +67,60 @@ public struct DCProfile: BlahProfile {
 
   public init(data: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidProfile
-    let fields = try CBOR.record(data, tag: .profile, requiredKeys: 0..<8, error: e)
-    guard fields[2]! == .unsigned(ProfileKind.dc.rawValue) else { throw e }
+    let fields = try CBOR.record(
+      data, tag: .profile, requiredKeys: Self.cborKeyTag..<(Self.cborKeyNamespaceGeneration + 1),
+      error: e)
+    guard fields[Self.cborKeyKind]! == .unsigned(ProfileKind.dc.rawValue) else { throw e }
     func endpoints(_ value: CBOR) throws(BlahError) -> [Endpoint] {
       var result: [Endpoint] = []
       for entry in try value.array(e) {
-        let a = try entry.record(e, requiredKeys: 0..<5)
-        guard let port = UInt16(exactly: try a[1]!.unsigned(e)), case .bool(let tls) = a[2]!,
-          let transport = Transport(rawValue: try a[3]!.unsigned(e)) else {
+        let a = try entry.record(e, requiredKeys: Endpoint.cborKeyHost..<(Endpoint.cborKeyPath + 1))
+        guard let port = UInt16(exactly: try a[Endpoint.cborKeyPort]!.unsigned(e)),
+          case .bool(let tls) = a[Endpoint.cborKeyTLS]!,
+          let transport = Transport(rawValue: try a[Endpoint.cborKeyTransport]!.unsigned(e))
+        else {
           throw e
         }
-        result.append(Endpoint(host: try a[0]!.text(e), port: port, tls: tls,
-          transport: transport, path: a[4]! == .null ? nil : try a[4]!.text(e)))
+        result.append(
+          Endpoint(
+            host: try a[Endpoint.cborKeyHost]!.text(e), port: port, tls: tls,
+            transport: transport,
+            path: a[Endpoint.cborKeyPath]! == .null ? nil : try a[Endpoint.cborKeyPath]!.text(e)))
       }
       return result
     }
     var domains: [String] = []
-    for domain in try fields[3]!.array(e) { domains.append(try domain.text(e)) }
+    for domain in try fields[Self.cborKeyDomains]!.array(e) { domains.append(try domain.text(e)) }
     self.domains = domains
-    self.endpoints = try endpoints(fields[4]!)
-    self.bidcomEndpoints = try endpoints(fields[5]!)
-    self.transportPublicKey = try fields[6]!.text(e)
-    self.namespaceGeneration = fields[7]! == .null ? nil : try fields[7]!.unsigned(e)
+    self.endpoints = try endpoints(fields[Self.cborKeyEndpoints]!)
+    self.bidcomEndpoints = try endpoints(fields[Self.cborKeyBIDCOMEndpoints]!)
+    self.transportPublicKey = try fields[Self.cborKeyTransportPublicKey]!.text(e)
+    self.namespaceGeneration =
+      fields[Self.cborKeyNamespaceGeneration]! == .null
+      ? nil : try fields[Self.cborKeyNamespaceGeneration]!.unsigned(e)
     try validate()
   }
 
   public func encoded() throws(BlahError) -> [UInt8] {
     try validate()
     func encode(_ endpoints: [Endpoint]) -> CBOR {
-      .array(endpoints.map { .record([
-        0: .text($0.host), 1: .unsigned(UInt64($0.port)), 2: .bool($0.tls),
-        3: .unsigned($0.transport.rawValue), 4: $0.path.map(CBOR.text) ?? .null,
-      ]) })
+      .array(
+        endpoints.map {
+          .record([
+            Endpoint.cborKeyHost: .text($0.host), Endpoint.cborKeyPort: .unsigned(UInt64($0.port)),
+            Endpoint.cborKeyTLS: .bool($0.tls),
+            Endpoint.cborKeyTransport: .unsigned($0.transport.rawValue),
+            Endpoint.cborKeyPath: $0.path.map(CBOR.text) ?? .null,
+          ])
+        })
     }
     return CBOR.record([
-      0: .unsigned(BlahTag.profile.rawValue), 1: .unsigned(1), 2: .unsigned(ProfileKind.dc.rawValue),
-      3: .array(domains.map(CBOR.text)), 4: encode(endpoints), 5: encode(bidcomEndpoints),
-      6: .text(transportPublicKey), 7: namespaceGeneration.map(CBOR.unsigned) ?? .null,
+      Self.cborKeyTag: .unsigned(BlahTag.profile.rawValue), Self.cborKeyVersion: .unsigned(1),
+      Self.cborKeyKind: .unsigned(ProfileKind.dc.rawValue),
+      Self.cborKeyDomains: .array(domains.map(CBOR.text)), Self.cborKeyEndpoints: encode(endpoints),
+      Self.cborKeyBIDCOMEndpoints: encode(bidcomEndpoints),
+      Self.cborKeyTransportPublicKey: .text(transportPublicKey),
+      Self.cborKeyNamespaceGeneration: namespaceGeneration.map(CBOR.unsigned) ?? .null,
     ]).encoded
   }
 

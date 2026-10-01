@@ -2,6 +2,21 @@
 ///
 /// The device signs it only when it equals the request the user reviewed.
 public struct AccountLinkChallenge: BlahStatement {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
+  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
+  public static let cborKeyDCDomain: UInt64 = 2
+  public static let cborKeyDCID: UInt64 = 3
+  public static let cborKeyNonce: UInt64 = 4
+  public static let cborKeyExpiresAt: UInt64 = 5
+  public static let cborKeyOperation: UInt64 = 6
+  public static let cborKeyProvider: UInt64 = 7
+  public static let cborKeyIdentityID: UInt64 = 8
+  public static let cborKeyRequestID: UInt64 = 9
+  public static let cborKeyExternalID: UInt64 = 10
+  public static let cborKeyPreviousExternalID: UInt64 = 11
+  public static let cborKeyLabel: UInt64 = 12
+
   public enum Operation: UInt64, Hashable, Sendable {
     case read = 1
     case start = 2
@@ -61,31 +76,46 @@ public struct AccountLinkChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .accountLink, requiredKeys: 0..<13, error: e)
-    guard let operation = Operation(rawValue: try a[6]!.unsigned(e)), a[7]! == .unsigned(1) else {
+    let a = try CBOR.record(
+      encoding, tag: .accountLink, requiredKeys: Self.cborKeyTag..<(Self.cborKeyLabel + 1), error: e
+    )
+    guard let operation = Operation(rawValue: try a[Self.cborKeyOperation]!.unsigned(e)),
+      a[Self.cborKeyProvider]! == .unsigned(1)
+    else {
       throw e
     }
     func text(_ value: CBOR) throws(BlahError) -> String? {
       let text = try value.text(e)
       return text.isEmpty ? nil : text
     }
-    let identity = try a[8]!.bytes(e)
-    let request = try a[9]!.bytes(e)
+    let identity = try a[Self.cborKeyIdentityID]!.bytes(e)
+    let request = try a[Self.cborKeyRequestID]!.bytes(e)
     try self.init(
-      dc: DCAddress(domain: a[2]!.text(e), id: a[3]!.digest(e)), nonce: a[4]!.bytes(e),
-      expiresAt: a[5]!.unsigned(e), operation: operation,
-      identityID: identity.isEmpty ? nil : a[8]!.digest(e), requestID: request.isEmpty ? nil : request,
-      externalID: text(a[10]!), previousExternalID: text(a[11]!), label: text(a[12]!))
-    extensionFields = a.filter { $0.key >= 13 }
+      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      nonce: a[Self.cborKeyNonce]!.bytes(e),
+      expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), operation: operation,
+      identityID: identity.isEmpty ? nil : a[Self.cborKeyIdentityID]!.digest(e),
+      requestID: request.isEmpty ? nil : request,
+      externalID: text(a[Self.cborKeyExternalID]!),
+      previousExternalID: text(a[Self.cborKeyPreviousExternalID]!),
+      label: text(a[Self.cborKeyLabel]!))
+    extensionFields = a.filter { $0.key > Self.cborKeyLabel }
   }
 
   public var encoding: [UInt8] {
-    CBOR.record([
-      0: .unsigned(BlahTag.accountLink.rawValue), 1: .unsigned(1), 2: .text(dc.domain), 3: .bytes(dc.id.bytes),
-      4: .bytes(nonce), 5: .unsigned(expiresAt), 6: .unsigned(operation.rawValue), 7: .unsigned(1),
-      8: .bytes(identityID?.bytes ?? []), 9: .bytes(requestID ?? []), 10: .text(externalID ?? ""),
-      11: .text(previousExternalID ?? ""), 12: .text(label ?? ""),
-    ], extensions: extensionFields).encoded
+    CBOR.record(
+      [
+        Self.cborKeyTag: .unsigned(BlahTag.accountLink.rawValue), Self.cborKeyVersion: .unsigned(1),
+        Self.cborKeyDCDomain: .text(dc.domain), Self.cborKeyDCID: .bytes(dc.id.bytes),
+        Self.cborKeyNonce: .bytes(nonce), Self.cborKeyExpiresAt: .unsigned(expiresAt),
+        Self.cborKeyOperation: .unsigned(operation.rawValue), Self.cborKeyProvider: .unsigned(1),
+        Self.cborKeyIdentityID: .bytes(identityID?.bytes ?? []),
+        Self.cborKeyRequestID: .bytes(requestID ?? []),
+        Self.cborKeyExternalID: .text(externalID ?? ""),
+        Self.cborKeyPreviousExternalID: .text(previousExternalID ?? ""),
+        Self.cborKeyLabel: .text(label ?? ""),
+      ], extensions: extensionFields
+    ).encoded
   }
 
   /// Requires a live challenge from the identity's home DC, naming this identity if any.

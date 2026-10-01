@@ -2,6 +2,22 @@
 ///
 /// The device signs it only when it equals the app and permissions the user reviewed.
 public struct OAuthConsentChallenge: BlahStatement {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = BlahTag.cborKeyTag
+  public static let cborKeyVersion: UInt64 = BlahTag.cborKeyVersion
+  public static let cborKeyDCDomain: UInt64 = 2
+  public static let cborKeyDCID: UInt64 = 3
+  public static let cborKeyNonce: UInt64 = 4
+  public static let cborKeyExpiresAt: UInt64 = 5
+  public static let cborKeyAppID: UInt64 = 6
+  public static let cborKeyAppName: UInt64 = 7
+  public static let cborKeyAppVersion: UInt64 = 8
+  public static let cborKeyRedirectURI: UInt64 = 9
+  public static let cborKeyScopes: UInt64 = 10
+  public static let cborKeyCodeChallenge: UInt64 = 11
+  public static let cborKeyState: UInt64 = 12
+  public static let cborKeyOIDCNonce: UInt64 = 13
+
   private var extensionFields: [UInt64: CBOR] = [:]
 
   public let dc: DCAddress
@@ -50,24 +66,37 @@ public struct OAuthConsentChallenge: BlahStatement {
 
   public init(encoding: [UInt8]) throws(BlahError) {
     let e = BlahError.invalidChallenge
-    let a = try CBOR.record(encoding, tag: .oauthConsent, requiredKeys: 0..<14, error: e)
+    let a = try CBOR.record(
+      encoding, tag: .oauthConsent, requiredKeys: Self.cborKeyTag..<(Self.cborKeyOIDCNonce + 1),
+      error: e)
     var scopes: [String] = []
-    for scope in try a[10]!.array(e) { scopes.append(try scope.text(e)) }
+    for scope in try a[Self.cborKeyScopes]!.array(e) { scopes.append(try scope.text(e)) }
     try self.init(
-      dc: DCAddress(domain: a[2]!.text(e), id: a[3]!.digest(e)), nonce: a[4]!.bytes(e),
-      expiresAt: a[5]!.unsigned(e), appID: a[6]!.unsigned(e), appName: a[7]!.text(e),
-      appVersion: a[8]!.unsigned(e), redirectURI: a[9]!.text(e), scopes: scopes,
-      codeChallenge: a[11]!.text(e), state: a[12]!.text(e), oidcNonce: a[13]!.text(e))
-    extensionFields = a.filter { $0.key >= 14 }
+      dc: DCAddress(domain: a[Self.cborKeyDCDomain]!.text(e), id: a[Self.cborKeyDCID]!.digest(e)),
+      nonce: a[Self.cborKeyNonce]!.bytes(e),
+      expiresAt: a[Self.cborKeyExpiresAt]!.unsigned(e), appID: a[Self.cborKeyAppID]!.unsigned(e),
+      appName: a[Self.cborKeyAppName]!.text(e),
+      appVersion: a[Self.cborKeyAppVersion]!.unsigned(e),
+      redirectURI: a[Self.cborKeyRedirectURI]!.text(e), scopes: scopes,
+      codeChallenge: a[Self.cborKeyCodeChallenge]!.text(e), state: a[Self.cborKeyState]!.text(e),
+      oidcNonce: a[Self.cborKeyOIDCNonce]!.text(e))
+    extensionFields = a.filter { $0.key > Self.cborKeyOIDCNonce }
   }
 
   public var encoding: [UInt8] {
-    CBOR.record([
-      0: .unsigned(BlahTag.oauthConsent.rawValue), 1: .unsigned(1), 2: .text(dc.domain), 3: .bytes(dc.id.bytes),
-      4: .bytes(nonce), 5: .unsigned(expiresAt), 6: .unsigned(appID), 7: .text(appName),
-      8: .unsigned(appVersion), 9: .text(redirectURI), 10: .array(scopes.map(CBOR.text)),
-      11: .text(codeChallenge), 12: .text(state), 13: .text(oidcNonce),
-    ], extensions: extensionFields).encoded
+    CBOR.record(
+      [
+        Self.cborKeyTag: .unsigned(BlahTag.oauthConsent.rawValue),
+        Self.cborKeyVersion: .unsigned(1), Self.cborKeyDCDomain: .text(dc.domain),
+        Self.cborKeyDCID: .bytes(dc.id.bytes),
+        Self.cborKeyNonce: .bytes(nonce), Self.cborKeyExpiresAt: .unsigned(expiresAt),
+        Self.cborKeyAppID: .unsigned(appID), Self.cborKeyAppName: .text(appName),
+        Self.cborKeyAppVersion: .unsigned(appVersion), Self.cborKeyRedirectURI: .text(redirectURI),
+        Self.cborKeyScopes: .array(scopes.map(CBOR.text)),
+        Self.cborKeyCodeChallenge: .text(codeChallenge), Self.cborKeyState: .text(state),
+        Self.cborKeyOIDCNonce: .text(oidcNonce),
+      ], extensions: extensionFields
+    ).encoded
   }
 
   /// Requires a live challenge from the identity's home DC.

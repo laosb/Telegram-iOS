@@ -1,5 +1,9 @@
 /// A message and a signature over it.
 public struct SignedMessage: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyMessage: UInt64 = 0
+  public static let cborKeySignature: UInt64 = 1
+
   private var extensionFields: [UInt64: CBOR] = [:]
 
   public let message: [UInt8]
@@ -17,13 +21,21 @@ public struct SignedMessage: Hashable, Sendable {
 
   /// Decodes a signed message from its ``encoding``.
   public init(encoding: [UInt8]) throws(DiemError) {
-    let a = try CBOR(decoding: encoding).recordValue(requiredKeys: 0..<2)
-    try self.init(message: a[0]!.bytesValue(), signature: a[1]!.bytesValue())
-    extensionFields = a.filter { $0.key >= 2 }
+    let a = try CBOR(decoding: encoding).recordValue(
+      requiredKeys: Self.cborKeyMessage..<(Self.cborKeySignature + 1))
+    try self.init(
+      message: a[Self.cborKeyMessage]!.bytesValue(),
+      signature: a[Self.cborKeySignature]!.bytesValue())
+    extensionFields = a.filter { $0.key > Self.cborKeySignature }
   }
 
   /// The canonical encoding.
-  public var encoding: [UInt8] { CBOR.record([0: .bytes(message), 1: .bytes(signature)], extensions: extensionFields).encoded }
+  public var encoding: [UInt8] {
+    CBOR.record(
+      [Self.cborKeyMessage: .bytes(message), Self.cborKeySignature: .bytes(signature)],
+      extensions: extensionFields
+    ).encoded
+  }
 
   /// The SHA-256 digest of ``message``.
   public var digest: Digest { Digest(hashing: message) }

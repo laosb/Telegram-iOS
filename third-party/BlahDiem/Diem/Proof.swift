@@ -1,5 +1,12 @@
 /// A device's signed statement of data on behalf of an identity.
 public struct Proof: Hashable, Sendable {
+  /// CBOR field keys.
+  public static let cborKeyTag: UInt64 = 0
+  public static let cborKeyVersion: UInt64 = 1
+  public static let cborKeyIdentityID: UInt64 = 2
+  public static let cborKeyDeviceID: UInt64 = 3
+  public static let cborKeyData: UInt64 = 4
+
   /// The device's signed message.
   public let signedMessage: SignedMessage
   public let identityID: Digest
@@ -8,11 +15,14 @@ public struct Proof: Hashable, Sendable {
 
   /// Decodes a proof from the device's signed message.
   public init(_ signedMessage: SignedMessage) throws(DiemError) {
-    let a = try CBOR(decoding: signedMessage.message).recordValue(requiredKeys: 0..<5)
-    guard a[0]! == .text("Diem/proof"), a[1]! == .unsigned(3) else { throw .invalidEncoding }
-    identityID = try Digest(bytes: a[2]!.bytesValue())
-    deviceID = try Digest(bytes: a[3]!.bytesValue())
-    data = try a[4]!.bytesValue()
+    let a = try CBOR(decoding: signedMessage.message).recordValue(
+      requiredKeys: Self.cborKeyTag..<(Self.cborKeyData + 1))
+    guard a[Self.cborKeyTag]! == .text("Diem/proof"), a[Self.cborKeyVersion]! == .unsigned(3) else {
+      throw .invalidEncoding
+    }
+    identityID = try Digest(bytes: a[Self.cborKeyIdentityID]!.bytesValue())
+    deviceID = try Digest(bytes: a[Self.cborKeyDeviceID]!.bytesValue())
+    data = try a[Self.cborKeyData]!.bytesValue()
     self.signedMessage = signedMessage
   }
 
@@ -38,8 +48,9 @@ public struct Proof: Hashable, Sendable {
     -> Self
   {
     let message = CBOR.record([
-      0: .text("Diem/proof"), 1: .unsigned(3), 2: .bytes(identityID.bytes),
-      3: .bytes(device.publicKey.id.bytes), 4: .bytes(data),
+      Self.cborKeyTag: .text("Diem/proof"), Self.cborKeyVersion: .unsigned(3),
+      Self.cborKeyIdentityID: .bytes(identityID.bytes),
+      Self.cborKeyDeviceID: .bytes(device.publicKey.id.bytes), Self.cborKeyData: .bytes(data),
     ]).encoded
     return try Self(await SignedMessage(signing: message, with: device.key))
   }
