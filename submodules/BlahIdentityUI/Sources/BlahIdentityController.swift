@@ -321,13 +321,13 @@ private final class IdentityCoordinator: NSObject, UIDocumentPickerDelegate {
             field.accessibilityLabel = title
         }
         alert.addAction(UIAlertAction(title: strings.Common_Cancel, style: .cancel))
-        alert.addAction(UIAlertAction(title: strings.Common_Continue, style: .default) { [weak alert] _ in complete(alert?.textFields?.first?.text ?? "") })
+        alert.addAction(UIAlertAction(title: strings.Login_Continue, style: .default) { [weak alert] _ in complete(alert?.textFields?.first?.text ?? "") })
         controller?.present(alert, animated: true)
     }
     private func confirm(_ text: String, complete: @escaping () -> Void) {
         let alert = UIAlertController(title: strings.blah_Identity_Title, message: text, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: strings.Common_Cancel, style: .cancel))
-        alert.addAction(UIAlertAction(title: strings.Common_Continue, style: .default) { _ in complete() })
+        alert.addAction(UIAlertAction(title: strings.Login_Continue, style: .default) { _ in complete() })
         controller?.present(alert, animated: true)
     }
     private func show(_ text: String) {

@@ -96,7 +96,7 @@ extension Network {
         |> mapToSignal { domain -> Signal<(Data, Int32), MTRpcError> in
             let buffer = Buffer()
             buffer.appendInt32(Int32(bitPattern: 0xdceefd53))
-            serializeString(domain, buffer: buffer, boxed: false)
+            serializeBytes(Buffer(data: Data(domain.utf8)), buffer: buffer, boxed: false)
             let description = FunctionDescription(name: "blah.requestIdentityChallenge", parameters: [])
             let parse = DeserializeFunctionResponse<(Data, Int32)> { buffer in
                 let reader = BufferReader(buffer)
@@ -106,14 +106,14 @@ extension Network {
             }
             return self.blahRawRequest((description, buffer, parse), automaticFloodWait: false)
         } |> mapToSignal { challenge in
-            return blahTask {
+            return blahTask { () -> Data in
                 let binding = await self.blahBinding()
                 let proof = try await BlahIdentityStore.shared.prove(slot: self.blahIdentitySlot,
                     challenge: challenge.0, expires: challenge.1, query: data.1.makeData(), keyID: binding.0, sessionID: binding.1)
                 let current = await self.blahBinding()
                 guard binding == current else { throw BlahIdentityError.invalidProfile }
                 return proof
-            } |> mapToSignal { proof in
+            } |> mapToSignal { proof -> Signal<T, MTRpcError> in
                 let buffer = Buffer()
                 buffer.appendInt32(Int32(bitPattern: 0x525b7c28))
                 serializeBytes(Buffer(data: proof), buffer: buffer, boxed: false)
