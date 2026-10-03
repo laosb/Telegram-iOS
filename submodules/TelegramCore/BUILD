@@ -13,7 +13,7 @@ swift_library(
     ],
     deps = [
         "//submodules/BlahIdentity:BlahIdentity",
-        "//third-party/BlahDiem:BlahDiem",
+        "@swiftpkg_blahdiem//:BlahDiem",
         "//submodules/TelegramApi:TelegramApi",
         "//submodules/MtProtoKit:MtProtoKit",
         "//submodules/MediaPreuploadRegistry:MediaPreuploadRegistry",

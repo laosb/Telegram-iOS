@@ -40,15 +40,33 @@ then verify it with the home DC and choose active usernames in Edit Profile.
 The integration is isolated in [BlahIdentity](submodules/BlahIdentity),
 [BlahIdentityUI](submodules/BlahIdentityUI), and the
 [network adapter](submodules/TelegramCore/Sources/Network/BlahIdentityNetwork.swift).
-[third-party/BlahDiem](third-party/BlahDiem) contains native Swift source snapshots with
-licenses and exact revisions. Refresh them from committed checkouts with:
+[BlahDiem](https://github.com/UInt8Co/BlahDiem) and its native Diem crypto backend are
+upstream Swift package dependencies. Their revisions live in
+[Package.swift](build-system/SwiftPackages/Package.swift); the committed
+[Package.resolved](build-system/SwiftPackages/Package.resolved) locks the transitive graph.
+[MODULE.bazel](MODULE.bazel) imports the package products through
+`rules_swift_package_manager` for both app builds and generated Xcode projects.
+
+To update a revision, edit the manifest, then regenerate both lockfiles:
 
 ```sh
-python3 build-system/BlahDiem/vendor.py /path/to/diem /path/to/BlahDiem
+swift package --package-path build-system/SwiftPackages resolve
+build-input/bazel-8.4.2-darwin-arm64 mod deps
 ```
 
-The Apple backend uses CryptoKit through a small `Crypto` re-export. No WASM is linked
-into the native app. Build through the repository's `build-system/Make/Make.py` workflow
+BlahDiem and Diem sources are unmodified. Recovery exports use Diem's public
+`IdentityPrivateKey.rawRepresentation` API; hardware keys remain non-exportable.
+The [package integration tests](build-system/SwiftPackages/Tests/BlahDiemPackageTests.swift)
+exercise profile encoding and sealed-key recovery against the fetched packages:
+
+```sh
+build-input/bazel-8.4.2-darwin-arm64 test //build-system/SwiftPackages:BlahDiemPackageTests \
+  --apple_platform_type=macos --macos_minimum_os=15.0
+```
+
+The Apple backend uses the upstream Swift Crypto package, which delegates to CryptoKit
+on Apple platforms. No WASM is linked into the native app. Build through the repository's
+`build-system/Make/Make.py` workflow
 with the configured Xcode and signing environment. Device validation must cover cancelled
 biometric prompts, lock/background transitions, publication after signup, file recovery,
 and iCloud recovery on a second device.

@@ -1,0 +1,17 @@
+load("@build_bazel_rules_swift//swift:swift_test.bzl", "swift_test")
+
+exports_files([
+    "Package.swift",
+    "Package.resolved",
+    "rspm-watch-package-manifest.patch",
+])
+
+swift_test(
+    name = "BlahDiemPackageTests",
+    size = "small",
+    srcs = ["Tests/BlahDiemPackageTests.swift"],
+    deps = [
+        "@swiftpkg_blahdiem//:BlahDiem",
+        "@swiftpkg_diem//:DiemSwiftCrypto",
+    ],
+)

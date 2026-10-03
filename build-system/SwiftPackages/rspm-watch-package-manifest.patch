@@ -1,0 +1,10 @@
+--- a/swiftpkg/bzlmod/swift_deps.bzl
++++ b/swiftpkg/bzlmod/swift_deps.bzl
+@@ -110,4 +110,7 @@
+     # Get the package info.
+     pkg_swift = module_ctx.path(from_package.swift)
++    # SwiftPM reads this file in a subprocess, which Bazel cannot track.
++    # Invalidate the extension's lockfile entry when the manifest changes.
++    module_ctx.watch(pkg_swift)
+     debug_path = module_ctx.path(".")
+     workspace_root = str(pkg_swift.dirname)

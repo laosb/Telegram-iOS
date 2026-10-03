@@ -216,6 +216,22 @@ local_path_override(
     path = "./build-system/bazel-rules/rules_swift",
 )
 
+bazel_dep(name = "rules_swift_package_manager", version = "1.23.0")
+
+# SwiftPM reads the manifest in a subprocess; make it an explicit extension input.
+single_version_override(
+    module_name = "rules_swift_package_manager",
+    patch_strip = 1,
+    patches = ["//build-system/SwiftPackages:rspm-watch-package-manifest.patch"],
+)
+
+swift_deps = use_extension("@rules_swift_package_manager//:extensions.bzl", "swift_deps")
+swift_deps.from_package(
+    swift = "//build-system/SwiftPackages:Package.swift",
+    resolved = "//build-system/SwiftPackages:Package.resolved",
+)
+use_repo(swift_deps, "swift_package", "swiftpkg_blahdiem", "swiftpkg_diem")
+
 bazel_dep(name = "apple_support", repo_name = "build_bazel_apple_support")
 local_path_override(
     module_name = "apple_support",

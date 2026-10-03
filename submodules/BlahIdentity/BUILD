@@ -4,6 +4,6 @@ swift_library(
     name = "BlahIdentity",
     module_name = "BlahIdentity",
     srcs = glob(["Sources/**/*.swift"]),
-    deps = ["//third-party/BlahDiem:BlahDiem", "//third-party/BlahDiem:DiemSwiftCrypto"],
+    deps = ["@swiftpkg_blahdiem//:BlahDiem", "@swiftpkg_diem//:DiemSwiftCrypto"],
     visibility = ["//visibility:public"],
 )

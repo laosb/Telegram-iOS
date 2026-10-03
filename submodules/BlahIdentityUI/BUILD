@@ -5,7 +5,7 @@ swift_library(
     module_name = "BlahIdentityUI",
     srcs = glob(["Sources/**/*.swift"]),
     deps = [
-        "//submodules/BlahIdentity", "//third-party/BlahDiem:BlahDiem",
+        "//submodules/BlahIdentity", "@swiftpkg_blahdiem//:BlahDiem",
         "//submodules/TelegramCore", "//submodules/TelegramPresentationData", "//submodules/Display",
         "//submodules/ItemListUI", "//submodules/SSignalKit/SwiftSignalKit",
     ],

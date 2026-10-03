@@ -185,7 +185,7 @@ public actor BlahIdentityStore {
         case renew
         case domains([ProfileDomain])
         case addDevice(Data)
-        case removeDevice(Digest)
+        case removeDevice(BlahDiem.Digest)
         case renewal(profileDays: UInt64, deviceDays: UInt64, automatic: Bool)
         case sync(Bool)
         case biometrics(Bool)
@@ -239,7 +239,7 @@ public actor BlahIdentityStore {
     // Recovery files use the OS-provided password encryption adapter, never a device-key export.
     public func exportRecovery(slot: String, password: String) throws -> Data {
         let current = try session(slot)
-        guard let secret = current.identity.identityKey?.key.rawRepresentation else { throw BlahIdentityError.locked }
+        guard let secret = current.identity.identityKey?.rawRepresentation else { throw BlahIdentityError.locked }
         return try BlahRecoveryFile.seal(JSONEncoder().encode(Recovery(version: 1, secret: Data(secret),
             profile: Data(current.identity.profile.encoding))), password: password)
     }
@@ -306,7 +306,7 @@ public actor BlahIdentityStore {
         for (slot, current) in sessions where current.identity.id == identity.id {
             sessions[slot] = Session(identity: identity, record: record, expires: current.expires)
         }
-        if record.sync, let secret = identity.identityKey?.key.rawRepresentation {
+        if record.sync, let secret = identity.identityKey?.rawRepresentation {
             let recovery = Recovery(version: 1, secret: Data(secret), profile: record.profile)
             try BlahKeychain.write("recovery:" + identity.id.description, data: JSONEncoder().encode(recovery), sync: true)
         }
