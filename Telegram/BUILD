@@ -1285,25 +1285,6 @@ swift_library(
     ],
 )
 
-genrule(
-    name = "SetMinOsVersionWidgetExtension",
-    cmd_bash =
-"""
-    name=WidgetExtension.appex
-    cat $(location PatchMinOSVersion.source.sh) | sed -e "s/<<<MIN_OS_VERSION>>>/14\\.0/g" | sed -e "s/<<<NAME>>>/$$name/g" > $(location SetMinOsVersionWidgetExtension.sh)
-""",
-    srcs = [
-        "PatchMinOSVersion.source.sh",
-    ],
-    outs = [
-        "SetMinOsVersionWidgetExtension.sh",
-    ],
-    executable = True,
-    visibility = [
-        "//visibility:public",
-    ]
-)
-
 ios_extension(
     name = "WidgetExtension",
     bundle_id = "{telegram_bundle_id}.Widget".format(
@@ -1320,12 +1301,9 @@ ios_extension(
         ":BuildNumberInfoPlist",
         ":AppNameInfoPlist",
     ],
-    minimum_os_version = minimum_os_version, # maintain the same minimum OS version across extensions
-    # Deliberately NOT patched down: this used to stamp MinimumOSVersion=14.0 so a WidgetKit
-    # extension could ship while the app min was 13.0. Now that the app min is >= 14, stamping
-    # a plist minimum *below* the binary's minos makes App Store validation reject the bundle
-    # (error 90208). Same reason the other extensions' patches are commented out.
-    #ipa_post_processor = ":SetMinOsVersionWidgetExtension",
+    # Keep the generated MinimumOSVersion aligned with the binary and its frameworks.
+    # Lowering only the widget's plist causes App Store validation error 90208.
+    minimum_os_version = minimum_os_version,
     #provides_main = True,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
