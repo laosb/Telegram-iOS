@@ -280,7 +280,7 @@ private final class IdentityCoordinator: NSObject, UIDocumentPickerDelegate {
             guard let self else { return }
             self.run {
                 let data = try await BlahIdentityStore.shared.exportRecovery(slot: self.slot, password: password)
-                await MainActor.run { self.share(data, filename: "identity.blahidentity") }
+                await MainActor.run { self.share(data, filename: "identity.cbor") }
             }
         }
     }
@@ -293,7 +293,7 @@ private final class IdentityCoordinator: NSObject, UIDocumentPickerDelegate {
         guard let url = urls.first else { return }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 600000,
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 262144,
             let data = try? Data(contentsOf: url) else { show(strings.blah_Identity_InvalidFile); return }
         prompt(title: strings.blah_Identity_BackupPassword, secure: true) { [weak self] password in
             guard let self else { return }

@@ -236,16 +236,20 @@ public actor BlahIdentityStore {
         return try await restoreRecovery(data, slot: slot, biometrics: biometrics, sync: true)
     }
 
-    // Recovery files use the OS-provided password encryption adapter, never a device-key export.
-    public func exportRecovery(slot: String, password: String) throws -> Data {
+    // File recovery carries the exportable root; hardware device keys stay on this phone.
+    public func exportRecovery(slot: String, password: String) async throws -> Data {
         let current = try session(slot)
-        guard let secret = current.identity.identityKey?.rawRepresentation else { throw BlahIdentityError.locked }
-        return try BlahRecoveryFile.seal(JSONEncoder().encode(Recovery(version: 1, secret: Data(secret),
-            profile: Data(current.identity.profile.encoding))), password: password)
+        guard let root = current.identity.identityKey else { throw BlahIdentityError.locked }
+        return try await BlahRecoveryFile.seal(profile: current.identity.profile, identityKey: root, password: password)
     }
 
     public func importRecovery(_ data: Data, password: String, slot: String, biometrics: Bool) async throws -> BlahIdentityView {
-        return try await restoreRecovery(BlahRecoveryFile.open(data, password: password), slot: slot, biometrics: biometrics, sync: false)
+        let contents = try await BlahRecoveryFile.open(data, password: password)
+        guard let root = contents.keys.first(where: { $0.publicKey.purpose == .identity }) else {
+            throw BlahIdentityError.invalidProfile
+        }
+        let recovery = Recovery(version: 1, secret: Data(root.secret), profile: Data(contents.profile.encoding))
+        return try await restoreRecovery(JSONEncoder().encode(recovery), slot: slot, biometrics: biometrics, sync: false)
     }
 
     private func restoreRecovery(_ data: Data, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {

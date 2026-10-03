@@ -17277,5 +17277,5 @@ Error: %8$@";
 "blah.Identity.RestoreCloud" = "Recover from iCloud";
 "blah.Identity.ProfileDomain" = "Domain serving your public profile";
 "blah.Identity.BackupPassword" = "Identity backup password";
-"blah.Identity.BackupNotice" = "Use at least 12 characters. Keep this password and a current identity file. It is only needed to export or import a backup.";
+"blah.Identity.BackupNotice" = "Choose a password. Keep it and a current identity file. It is only needed to export or import a backup.";
 "blah.Identity.InvalidFile" = "Choose a valid identity file smaller than 600 KB.";

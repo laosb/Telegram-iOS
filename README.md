@@ -14,7 +14,8 @@ pinned per account; another home or identity requires another account slot. Unbo
 legacy transport sessions require a fresh account.
 
 Create an identity for a domain you can host, or import a password-encrypted identity
-file. Browser v1 backups from tweb/telegram-tt and native recovery files are accepted.
+file. Shared BlahDiem CBOR/HPKE files containing identity recovery authority are accepted;
+device-only files and JSON backups are unsupported.
 Publish the exported public `profile.cbor` at every listed HTTPS domain with content type
 `application/cbor`. Sign in with the identity; supply an admission email if the DC requires
 one. Signup saves the allocated account number into the profile. Publish that updated
@@ -24,7 +25,8 @@ devices, profile validity and renewal; publish every authority change.
 Identity custody lives in Keychain independently of chat storage. Native BlahDiem uses
 Secure Enclave P-256 device keys and seals the Ed25519 recovery key to another Secure
 Enclave key. **Unlock with Face ID or Touch ID** is optional; there is no separate identity
-passcode. Encrypted file export/import uses a backup password of at least 12 characters.
+passcode. Encrypted file export/import requires a nonempty backup password with no additional
+length or complexity rules.
 **Sync recovery with iCloud Keychain** is opt-in and synchronizes the recoverable identity
 key and profile, not the hardware device keys. Recovery fetches the latest hosted profile,
 enrolls a fresh Secure Enclave device, and requires publication. Native recovery exports
@@ -54,8 +56,8 @@ swift package --package-path build-system/SwiftPackages resolve
 build-input/bazel-8.4.2-darwin-arm64 mod deps
 ```
 
-BlahDiem and Diem sources are unmodified. Recovery exports use Diem's public
-`IdentityPrivateKey.rawRepresentation` API; hardware keys remain non-exportable.
+Recovery exports use BlahDiem’s `KeyFile` API and the platform PBKDF2 adapter; hardware
+keys remain non-exportable.
 The [package integration tests](build-system/SwiftPackages/Tests/BlahDiemPackageTests.swift)
 exercise profile encoding and sealed-key recovery against the fetched packages:
 
