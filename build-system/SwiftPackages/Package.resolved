@@ -1,12 +1,12 @@
 {
-  "originHash" : "0301b48af16064ed607a8cff4209c2824651f9d7f43749208c1d8e2f5c39ed3a",
+  "originHash" : "0e46c3ee3c2e609566d1164ace380477812ef25bc656e9f7f2aaa95cedc47fa9",
   "pins" : [
     {
       "identity" : "blahdiem",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/UInt8Co/BlahDiem.git",
       "state" : {
-        "revision" : "bd89a76e8f144468d24b5d83df56709300785c8f"
+        "revision" : "ab0297ce17280ae500944253d37d025ac9b2e23f"
       }
     },
     {
@@ -14,7 +14,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/UInt8Co/diem.git",
       "state" : {
-        "revision" : "ea6383c39389fc700f15137c6e2a137b524724dc"
+        "revision" : "1b47c2eee6195b0fb91d0649e0206274abc34a28"
       }
     },
     {
@@ -31,8 +31,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-crypto.git",
       "state" : {
-        "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
-        "version" : "4.5.2"
+        "revision" : "c2cbadd7263439d8015189668f96ff5b5be565ce",
+        "version" : "5.0.3"
       }
     }
   ],

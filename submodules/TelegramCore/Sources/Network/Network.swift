@@ -531,7 +531,7 @@ private final class NetworkMainSessionDelegate: NetworkEngineSessionDelegate {
     }
 }
 
-func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializationArguments, supplementary: Bool, datacenterId: Int, keychain: Keychain, basePath: String, testingEnvironment: Bool, languageCode: String?, proxySettings: ProxySettings?, networkSettings: NetworkSettings?, networkEngine: NetworkEngineInputs, phoneNumber: String?, useRequestTimeoutTimers: Bool, appConfiguration: AppConfiguration) -> Signal<Network, NoError> {
+func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializationArguments, supplementary: Bool, datacenterId: Int, keychain: Keychain, basePath: String, testingEnvironment: Bool, languageCode: String?, proxySettings: ProxySettings?, networkSettings: NetworkSettings?, networkEngine: NetworkEngineInputs, phoneNumber: String?, useRequestTimeoutTimers: Bool, appConfiguration: AppConfiguration, requireBlahBinding: Bool = false) -> Signal<Network, NoError> {
     // TelegramApi's field accessors are inlined into this module; trap if it was built against a
     // different TelegramApi layout (stale objects from an incremental non-Bazel build).
     tlVerifyClientLayout()
@@ -577,6 +577,7 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             let useTempAuthKeys: Bool = true
             
             let context = MTContext(serialization: serialization, encryptionProvider: arguments.encryptionProvider, apiEnvironment: apiEnvironment, isTestingEnvironment: testingEnvironment, useTempAuthKeys: useTempAuthKeys)
+            context.setPinnedDatacenterAddresses([:], publicKeys: [:])
             context.refreshesTemporaryKeys = !supplementary
             
             if let networkSettings = networkSettings {
@@ -658,6 +659,10 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             #endif*/
             
             var rustDisabledReason = networkEngineRustDisabledReason(appConfiguration: appConfiguration, engineState: networkEngine.state, appVersion: arguments.appVersion, timestamp: Int32(Date().timeIntervalSince1970))
+            // Device proofs and signed DC pins require the MTProtoKit binding adapter.
+            if context.hasPinnedDatacenterConfiguration {
+                rustDisabledReason = "Blah identity transport binding"
+            }
             #if os(macOS)
             if rustDisabledReason == nil {
                 rustDisabledReason = networkLivenessDisabledReason()
@@ -708,6 +713,7 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             
             let network = Network(queue: queue, datacenterId: datacenterId, context: context, engine: engine, switchingEngine: switchingEngine, engineFactory: arguments.networkEngineFactory, rustEngineDisabled: rustEngineDisabled, rustEngineWaitsForWebProxy: rustEngineWaitsForWebProxy, mainSession: mainSession, mainSessionDelegate: mainSessionDelegate, telemetry: telemetry, _connectionStatus: connectionStatus, basePath: basePath, appDataDisposable: appDataDisposable, encryptionProvider: arguments.encryptionProvider, useRequestTimeoutTimers: useRequestTimeoutTimers, useBetaFeatures: arguments.useBetaFeatures, useExperimentalFeatures: useExperimentalFeatures, baseTcpConnectionInterfaceFactory: baseTcpConnectionInterfaceFactory, isAppExtension: isAppExtension, initialWebProxyActive: initialActiveServer?.isWebProxy == true)
             
+            network.blahRequiresRestoredBinding = requireBlahBinding
             network.restoreBlahHome()
 
             if let data = appConfiguration.data, let notifyInterval = data["upload_premium_speedup_notify_period"] as? Double {
@@ -877,6 +883,7 @@ public final class Network: NSObject {
     let mainSession: NetworkEngineSession
     let requestService: NetworkEngineRequestService
     let basePath: String
+    var blahRequiresRestoredBinding = false
     let blahHomeReady = ValuePromise<Bool>(false, ignoreRepeated: true)
     let blahIdentityError = Atomic<String?>(value: nil)
     private let mainSessionDelegate: NetworkMainSessionDelegate
@@ -1348,7 +1355,7 @@ public final class Network: NSObject {
                     return nil
                 },
                 options: NetworkEngineRequestOptions(),
-                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _, _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
+                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
                 dependsOn: networkRequestDependency(tag: tag),
                 acknowledged: {
                     if info.contains(.acknowledgement) {
@@ -1380,7 +1387,7 @@ public final class Network: NSObject {
         }
     }
     
-    public func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
+    func request<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), tag: NetworkRequestDependencyTag? = nil, automaticFloodWait: Bool = true, onFloodWaitError: ((String) -> Void)? = nil) -> Signal<T, MTRpcError> {
         if blahNeedsIdentity(data.0.name) {
             return self.blahRequest(data)
         }
@@ -1401,7 +1408,7 @@ public final class Network: NSObject {
                     return nil
                 },
                 options: NetworkEngineRequestOptions(),
-                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _, _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
+                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
                 dependsOn: networkRequestDependency(tag: tag),
                 acknowledged: nil,
                 progress: nil,

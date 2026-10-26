@@ -169,6 +169,8 @@ static MTDatacenterAuthInfoMapKeyStruct parseAuthInfoMapKeyInteger(NSNumber *key
     
     NSMutableDictionary *_datacenterSeedAddressSetById;
     NSMutableDictionary *_datacenterAddressSetById;
+    NSDictionary<NSNumber *, MTDatacenterAddressSet *> *_pinnedDatacenterAddresses;
+    NSDictionary<NSNumber *, NSArray<NSDictionary *> *> *_pinnedDatacenterPublicKeys;
     NSMutableDictionary<MTTransportSchemeKey *, MTTransportScheme *> *_datacenterManuallySelectedSchemeById;
     
     NSMutableDictionary<NSNumber *, NSMutableDictionary<MTDatacenterAddress *, MTTransportSchemeStats *> *> *_transportSchemeStats;
@@ -674,14 +676,61 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
 {
     [[MTContext contextQueue] dispatchOnQueue:^
     {
+        if (_pinnedDatacenterAddresses != nil) {
+            return;
+        }
         _datacenterSeedAddressSetById[@(datacenterId)] = seedAddressSet;
     }];
+}
+
+- (bool)hasPinnedDatacenterConfiguration {
+    __block bool result = false;
+    [[MTContext contextQueue] dispatchOnQueue:^{
+        result = _pinnedDatacenterAddresses != nil;
+    } synchronous:true];
+    return result;
+}
+
+- (void)setPinnedDatacenterAddresses:(NSDictionary<NSNumber *, MTDatacenterAddressSet *> *)addresses publicKeys:(NSDictionary<NSNumber *, NSArray<NSDictionary *> *> *)publicKeys {
+    [[MTContext contextQueue] dispatchOnQueue:^{
+        NSMutableSet<NSNumber *> *datacenterIds = [[NSMutableSet alloc] initWithArray:[self knownDatacenterIds]];
+        [datacenterIds addObjectsFromArray:addresses.allKeys];
+        _pinnedDatacenterAddresses = [addresses copy];
+        _pinnedDatacenterPublicKeys = [publicKeys copy];
+
+        [_backupAddressListDisposable dispose];
+        _backupAddressListDisposable = nil;
+        _discoverBackupAddressListSignal = nil;
+        for (MTDiscoverDatacenterAddressAction *action in [_discoverDatacenterAddressActions.allValues copy]) {
+            [action cancel];
+        }
+        [_discoverDatacenterAddressActions removeAllObjects];
+        for (id<MTDisposable> disposable in [_transportSchemeDisposableByDatacenterId.allValues copy]) {
+            [disposable dispose];
+        }
+        [_transportSchemeDisposableByDatacenterId removeAllObjects];
+        for (id<MTDisposable> disposable in [_fetchPublicKeysActions.allValues copy]) {
+            [disposable dispose];
+        }
+        [_fetchPublicKeysActions removeAllObjects];
+        [_datacenterSeedAddressSetById removeAllObjects];
+        [_datacenterManuallySelectedSchemeById removeAllObjects];
+
+        // Use ordinary notifications so an endpoint/key rotation also resets active transports.
+        for (NSNumber *datacenterId in datacenterIds) {
+            [self updatePublicKeysForDatacenterWithId:datacenterId.integerValue publicKeys:publicKeys[datacenterId] ?: @[]];
+            [self updateAddressSetForDatacenterWithId:datacenterId.integerValue addressSet:addresses[datacenterId] ?: [[MTDatacenterAddressSet alloc] initWithAddressList:@[]] forceUpdateSchemes:true];
+        }
+    } synchronous:true];
 }
 
 - (void)updateAddressSetForDatacenterWithId:(NSInteger)datacenterId addressSet:(MTDatacenterAddressSet *)addressSet forceUpdateSchemes:(bool)forceUpdateSchemes
 {
     [[MTContext contextQueue] dispatchOnQueue:^
     {
+        if (_pinnedDatacenterAddresses != nil && ![addressSet.addressList isEqualToArray:_pinnedDatacenterAddresses[@(datacenterId)].addressList ?: @[]]) {
+            return;
+        }
         if (addressSet != nil && datacenterId != 0)
         {
             if (MTLogEnabled()) {
@@ -763,6 +812,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     
     [[MTContext contextQueue] dispatchOnQueue:^
     {
+        if (_pinnedDatacenterAddresses != nil) {
+            return;
+        }
         bool updated = false;
         
         MTDatacenterAddressSet *addressSet = [self addressSetForDatacenterWithId:datacenterId];
@@ -993,6 +1045,10 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     
     [[MTContext contextQueue] dispatchOnQueue:^
     {
+        if (_pinnedDatacenterAddresses != nil) {
+            [datacenterIds addObjectsFromArray:_pinnedDatacenterAddresses.allKeys];
+            return;
+        }
         for (NSNumber *nDatacenterId in _datacenterSeedAddressSetById.allKeys)
         {
             [datacenterIds addObject:nDatacenterId];
@@ -1016,6 +1072,13 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     {
         if (block == nil)
             return;
+
+        if (_pinnedDatacenterAddresses != nil) {
+            [_pinnedDatacenterAddresses enumerateKeysAndObjectsUsingBlock:^(NSNumber *datacenterId, MTDatacenterAddressSet *addressSet, BOOL *stop) {
+                block(datacenterId.integerValue, addressSet, stop);
+            }];
+            return;
+        }
         
         NSMutableSet *processedDatacenterIds = [[NSMutableSet alloc] init];
         
@@ -1038,6 +1101,10 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     __block MTDatacenterAddressSet *result = nil;
     [[MTContext contextQueue] dispatchOnQueue:^
     {
+        if (_pinnedDatacenterAddresses != nil) {
+            result = _pinnedDatacenterAddresses[@(datacenterId)] ?: [[MTDatacenterAddressSet alloc] initWithAddressList:@[]];
+            return;
+        }
         MTDatacenterAddressSet *addressSet = _datacenterAddressSetById[@(datacenterId)];
         if (addressSet != nil && addressSet.addressList.count != 0) {
             result = _datacenterAddressSetById[@(datacenterId)];
@@ -1098,7 +1165,7 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     __block NSMutableArray <MTTransportScheme *> *results = [[NSMutableArray alloc] init];
     [[MTContext contextQueue] dispatchOnQueue:^
     {
-        MTDatacenterAddress *overrideAddress = _apiEnvironment.datacenterAddressOverrides[@(datacenterId)];
+        MTDatacenterAddress *overrideAddress = _pinnedDatacenterAddresses == nil ? _apiEnvironment.datacenterAddressOverrides[@(datacenterId)] : nil;
         bool isAddressOverride = false;
         if (overrideAddress != nil) {
             isAddressOverride = true;
@@ -1181,6 +1248,10 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
 - (NSArray<NSDictionary *> *)publicKeysForDatacenterWithId:(NSInteger)datacenterId {
     __block NSArray<NSDictionary *> *result = nil;
     [[MTContext contextQueue] dispatchOnQueue:^{
+        if (_pinnedDatacenterAddresses != nil) {
+            result = _pinnedDatacenterPublicKeys[@(datacenterId)] ?: @[];
+            return;
+        }
         result = _datacenterPublicKeysById[@(datacenterId)];
     } synchronous:true];
     
@@ -1189,6 +1260,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     
 - (void)updatePublicKeysForDatacenterWithId:(NSInteger)datacenterId publicKeys:(NSArray<NSDictionary *> *)publicKeys {
     [[MTContext contextQueue] dispatchOnQueue:^{
+        if (_pinnedDatacenterAddresses != nil && ![publicKeys isEqualToArray:_pinnedDatacenterPublicKeys[@(datacenterId)] ?: @[]]) {
+            return;
+        }
         if (publicKeys != nil) {
             _datacenterPublicKeysById[@(datacenterId)] = publicKeys;
             [_keychain setObject:_datacenterPublicKeysById forKey:@"datacenterPublicKeysById" group:@"ephemeral"];
@@ -1207,6 +1281,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
     
 - (void)publicKeysForDatacenterWithIdRequired:(NSInteger)datacenterId {
     [[MTContext contextQueue] dispatchOnQueue:^{
+        if (_pinnedDatacenterAddresses != nil) {
+            return;
+        }
         if (_fetchPublicKeysActions[@(datacenterId)] == nil) {
             for (MTWeakContextChangeListener *value in _changeListeners) {
                 id<MTContextChangeListener> listener = value.target;
@@ -1318,7 +1395,7 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
             __weak MTContext *weakSelf = self;
             MTDatacenterAddressSet *initialAddressSet = [self addressSetForDatacenterWithId:datacenterId];
             NSMutableArray *addressList = [[NSMutableArray alloc] initWithArray:initialAddressSet.addressList];
-            MTDatacenterAddressSet *seedAddress = _datacenterSeedAddressSetById[@(datacenterId)];
+            MTDatacenterAddressSet *seedAddress = _pinnedDatacenterAddresses == nil ? _datacenterSeedAddressSetById[@(datacenterId)] : nil;
             if (seedAddress != nil) {
                 for (MTDatacenterAddress *address in seedAddress.addressList) {
                     if (![addressList containsObject:address]) {
@@ -1498,6 +1575,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
 }
 
 - (void)_beginBackupAddressDiscoveryWithDelay:(double)delay {
+    if (_pinnedDatacenterAddresses != nil) {
+        return;
+    }
     if (_backupAddressListDisposable == nil && _discoverBackupAddressListSignal != nil) {
         __weak MTContext *weakSelf = self;
         _backupAddressListDisposable = [[[_discoverBackupAddressListSignal delay:delay onQueue:[MTQueue mainQueue]] onDispose:^{
@@ -1565,6 +1645,9 @@ static void copyKeychainDictionaryKey(NSString * _Nonnull group, NSString * _Non
 {
     [[MTContext contextQueue] dispatchOnQueue:^
     {
+        if (_pinnedDatacenterAddresses != nil) {
+            return;
+        }
         if (_discoverDatacenterAddressActions[@(datacenterId)] == nil)
         {
             MTDiscoverDatacenterAddressAction *discoverAction = [[MTDiscoverDatacenterAddressAction alloc] init];

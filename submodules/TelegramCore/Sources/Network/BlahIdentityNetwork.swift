@@ -4,7 +4,7 @@ import BlahDiem
 import BlahIdentity
 import MtProtoKit
 import SwiftSignalKit
-import TelegramApi
+internal import TelegramApi
 
 private let blahLoginMethods: Set<String> = ["auth.sendCode", "auth.signUp", "auth.signIn", "auth.checkPassword", "auth.recoverPassword"]
 func blahNeedsIdentity(_ name: String) -> Bool {
@@ -21,9 +21,12 @@ extension Network {
             do {
                 if let home = try await BlahIdentityStore.shared.home(slot: self.blahIdentitySlot) {
                     let refreshed = try await BlahIdentityStore.shared.connect(domain: home.domain, slot: self.blahIdentitySlot)
+                    try await BlahIdentityStore.shared.validateRestoredBinding(slot: self.blahIdentitySlot, required: self.blahRequiresRestoredBinding)
                     try await self.activateBlahHome(refreshed)
                 }
-            } catch { /* Keep the connection closed. Identity Manager offers discovery retry. */ }
+            } catch {
+                let _ = self.blahIdentityError.swap(error.localizedDescription)
+            }
         }
     }
 
@@ -33,6 +36,7 @@ extension Network {
             throw BlahIdentityError.wrongHome
         }
         let home = try await BlahIdentityStore.shared.connect(domain: domain, slot: self.blahIdentitySlot)
+        try await BlahIdentityStore.shared.validateRestoredBinding(slot: self.blahIdentitySlot, required: self.blahRequiresRestoredBinding)
         try await self.activateBlahHome(home)
     }
 
@@ -53,7 +57,7 @@ extension Network {
 
     private func blahBinding() async -> (Int64, Int64) {
         return await withCheckedContinuation { continuation in
-            self.mtProto.identityBinding { key, session in continuation.resume(returning: (key, session)) }
+            self.mainSession.identityBinding { key, session in continuation.resume(returning: (key, session)) }
         }
     }
 
@@ -85,7 +89,10 @@ extension Network {
             if error.errorDescription.hasPrefix("BLAH_IDENTITY: ") {
                 let _ = self.blahIdentityError.swap(String(error.errorDescription.dropFirst(15)))
             } else if error.errorDescription == "SIGNUP_EMAIL_REQUIRED" {
-                let _ = self.blahIdentityError.swap("This DC requires an admission email. Open Identity Manager, enter the email, and sign in again.")
+                let _ = self.blahIdentityError.swap("SIGNUP_EMAIL_REQUIRED")
+            }
+            if error.errorDescription.contains("_MIGRATE_") {
+                return MTRpcError(errorCode: 400, errorDescription: "BLAH_HOME_MIGRATION_REFUSED")
             }
             return error
         }
@@ -95,12 +102,14 @@ extension Network {
         return blahTask { try await BlahIdentityStore.shared.bind(slot: self.blahIdentitySlot) }
         |> mapToSignal { domain -> Signal<(Data, Int32), MTRpcError> in
             let buffer = Buffer()
+            buffer.appendInt32(Int32(bitPattern: 0xfb8f651a)) // blah.invokeWithLayer
+            buffer.appendInt32(1)
             buffer.appendInt32(Int32(bitPattern: 0xdceefd53))
             serializeBytes(Buffer(data: Data(domain.utf8)), buffer: buffer, boxed: false)
             let description = FunctionDescription(name: "blah.requestIdentityChallenge", parameters: [])
             let parse = DeserializeFunctionResponse<(Data, Int32)> { buffer in
                 let reader = BufferReader(buffer)
-                guard reader.readInt32() == Int32(bitPattern: 0xa5bf10f6),
+                guard reader.readInt32() == Int32(bitPattern: 0x2b2e0aab),
                     let challenge = parseBytes(reader), let expires = reader.readInt32() else { return nil }
                 return (challenge.makeData(), expires)
             }
@@ -108,6 +117,7 @@ extension Network {
         } |> mapToSignal { challenge in
             return blahTask { () -> Data in
                 let binding = await self.blahBinding()
+                guard binding.0 != 0, binding.1 != 0 else { throw BlahIdentityError.invalidProfile }
                 let proof = try await BlahIdentityStore.shared.prove(slot: self.blahIdentitySlot,
                     challenge: challenge.0, expires: challenge.1, query: data.1.makeData(), keyID: binding.0, sessionID: binding.1)
                 let current = await self.blahBinding()
@@ -115,7 +125,9 @@ extension Network {
                 return proof
             } |> mapToSignal { proof -> Signal<T, MTRpcError> in
                 let buffer = Buffer()
-                buffer.appendInt32(Int32(bitPattern: 0x525b7c28))
+                buffer.appendInt32(Int32(bitPattern: 0xfb8f651a)) // blah.invokeWithLayer
+                buffer.appendInt32(1)
+                buffer.appendInt32(Int32(bitPattern: 0x61b4c668))
                 serializeBytes(Buffer(data: proof), buffer: buffer, boxed: false)
                 buffer.appendBuffer(data.1)
                 return self.blahRawRequest((FunctionDescription(name: "blah.invokeWithIdentityProof", parameters: []), buffer, data.2), automaticFloodWait: false)

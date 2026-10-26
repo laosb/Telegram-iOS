@@ -594,6 +594,10 @@ private final class MtProtoKitSession: NSObject, NetworkEngineSession, MTRequest
         }
     }
     
+    func identityBinding(_ reply: @escaping (Int64, Int64) -> Void) {
+        self.mtProto.identityBinding(reply)
+    }
+
     func setPaused(_ paused: Bool) {
         if paused {
             self.mtProto.pause()

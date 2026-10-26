@@ -30,17 +30,16 @@ public struct CustomDCConfig {
     /// Each independently pinned Blah home occupies DC 1 in its own account slot.
     public static var initialDatacenterId: Int { 1 }
 
-    /// Overrides seed addresses and pre-loads RSA public keys for each custom DC.
-    /// Also wipes any keychain-persisted addresses for standard Telegram DC IDs we don't use,
-    /// so stale data from previous runs can't cause unwanted connections.
+    /// Installs the complete verified address/RSA allowlist for this account's home.
     public func apply(to context: MTContext) {
-        NSLog("[blah] CustomDCConfig: applying config — defaultDcId=%d dcs=%d", defaultDcId, dcs.count)
-        let configuredIds = Set(dcs.map { $0.id })
+        var addressSets: [NSNumber: MTDatacenterAddressSet] = [:]
+        var publicKeys: [NSNumber: [[String: Any]]] = [:]
         for dc in dcs {
             let addresses = dc.endpoints.compactMap { endpoint -> MTDatacenterAddress? in
-                MTDatacenterAddress(
+                guard let port = UInt16(exactly: endpoint.port), port != 0 else { return nil }
+                return MTDatacenterAddress(
                     ip: endpoint.ip,
-                    port: UInt16(endpoint.port),
+                    port: port,
                     preferForMedia: false,
                     restrictToTcp: false,
                     cdn: false,
@@ -48,21 +47,10 @@ public struct CustomDCConfig {
                     secret: nil
                 )
             }
-            if !addresses.isEmpty {
-                context.setSeedAddressSetForDatacenterWithId(
-                    dc.id,
-                    seedAddressSet: MTDatacenterAddressSet(addressList: addresses)
-                )
-            }
-            context.updateAddressSetForDatacenter(withId: dc.id,
-                addressSet: MTDatacenterAddressSet(addressList: addresses), forceUpdateSchemes: true)
-            context.updatePublicKeysForDatacenter(withId: dc.id, publicKeys: [["key": dc.rsaPublicKeyPem]])
-            NSLog("[blah] CustomDCConfig: DC %d — %d endpoints, RSA key registered", dc.id, addresses.count)
+            let id = NSNumber(value: dc.id)
+            addressSets[id] = MTDatacenterAddressSet(addressList: addresses)
+            publicKeys[id] = [["key": dc.rsaPublicKeyPem]]
         }
-        // Clear any cached addresses in the persistent keychain for Telegram production DC IDs
-        // that we don't configure.
-        for dcId in 1...5 where !configuredIds.contains(dcId) {
-            context.updateAddressSetForDatacenter(withId: dcId, addressSet: MTDatacenterAddressSet(addressList: []), forceUpdateSchemes: false)
-        }
+        context.setPinnedDatacenterAddresses(addressSets, publicKeys: publicKeys)
     }
 }

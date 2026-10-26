@@ -261,7 +261,7 @@ typedef enum {
         }
     } else {
         NSArray<NSDictionary *> *contextKeys = [mtProto.context publicKeysForDatacenterWithId:mtProto.datacenterId];
-        if (contextKeys.count > 0) {
+        if (contextKeys.count > 0 || mtProto.context.hasPinnedDatacenterConfiguration) {
             _publicKeys = [self convertPublicKeysFromDictionaries:contextKeys];
         } else {
             _publicKeys = defaultPublicKeys(!mtProto.context.isTestingEnvironment);
@@ -554,7 +554,7 @@ static NSData *encryptRSAModernPadding(id<EncryptionProvider> encryptionProvider
         {
             MTDatacenterAuthPublicKey *publicKey = selectPublicKey(_encryptionProvider, resPqMessage.serverPublicKeyFingerprints, _publicKeys);
             
-            if (publicKey == nil && mtProto.cdn && !_cdnPublicKeysRefetched)
+            if (publicKey == nil && mtProto.cdn && !mtProto.context.hasPinnedDatacenterConfiguration && !_cdnPublicKeysRefetched)
             {
                 if (MTLogEnabled()) {
                     MTLog(@"[MTDatacenterAuthMessageService#%p no CDN key matches the server, fetching the CDN keys again]", self);
@@ -568,7 +568,7 @@ static NSData *encryptRSAModernPadding(id<EncryptionProvider> encryptionProvider
                 return;
             }
             
-            if (publicKey == nil && mtProto.cdn && resPqMessage.serverPublicKeyFingerprints.count == 1 && _publicKeys.count == 1) {
+            if (publicKey == nil && mtProto.cdn && !mtProto.context.hasPinnedDatacenterConfiguration && resPqMessage.serverPublicKeyFingerprints.count == 1 && _publicKeys.count == 1) {
                 if (MTLogEnabled()) {
                     MTLog(@"[MTDatacenterAuthMessageService#%p no CDN key matches the server after a refetch, using the only CDN key the main datacenter gave]", self);
                 }

@@ -13,14 +13,16 @@ public struct BlahIdentitySummary: Sendable {
 @available(iOS 18.0, macOS 15.0, *)
 public struct BlahIdentityView: Sendable {
     public let id: String
-    public let profile: Profile
-    public let user: UserProfile
+    public let profile: AnyBlahProfile
+    public let user: HostedContent
     public let device: DevicePublicKey
     public let biometrics: Bool
     public let sync: Bool
     public let profileDays: UInt64
     public let deviceDays: UInt64
     public let autoRenew: Bool
+    public let hostingDomain: String?
+    public let publicationPending: Bool
 }
 
 @available(iOS 18.0, macOS 15.0, *)
@@ -44,14 +46,23 @@ public actor BlahIdentityStore {
         var profileDays: UInt64 = 180
         var deviceDays: UInt64 = 180
         var autoRenew: Bool = true
+        var hostingDomain: String?
+        var publishedProfile: Data?
+        var checkedProfile: Data?
     }
     private struct Recovery: Codable {
         let version: Int
         let secret: Data
         let profile: Data
+        var hostingDomain: String?
+    }
+    private struct Binding: Codable {
+        let namespace: String
+        let identityID: String
+        let deviceID: Data
     }
     private struct Session {
-        var identity: Identity
+        var identity: BasicIdentity<AnyBlahProfile>
         var record: Record
         var expires: UInt64
     }
@@ -59,16 +70,16 @@ public actor BlahIdentityStore {
     public func list() throws -> [BlahIdentitySummary] {
         return try BlahKeychain.keys().filter { $0.hasPrefix("identity:") }.map { key in
             let record = try readRecord(String(key.dropFirst(9)))
-            let profile = try Profile(encoding: Array(record.profile))
-            return BlahIdentitySummary(id: profile.id.description, domain: try UserProfile(profile).domains.first?.name ?? profile.id.description)
+            let profile = try AnyBlahProfile(encoding: Array(record.profile))
+            return BlahIdentitySummary(id: profile.id.description, domain: profile.domains.first?.name ?? profile.id.description)
         }.sorted { $0.domain < $1.domain }
     }
 
     public func cloudIdentities() throws -> [BlahIdentitySummary] {
         return try BlahKeychain.keys(sync: true).filter { $0.hasPrefix("recovery:") }.map { key in
             let recovery = try JSONDecoder().decode(Recovery.self, from: BlahKeychain.read(key, sync: true)!)
-            let profile = try Profile(encoding: Array(recovery.profile))
-            return BlahIdentitySummary(id: profile.id.description, domain: try UserProfile(profile).domains.first?.name ?? profile.id.description)
+            let profile = try AnyBlahProfile(encoding: Array(recovery.profile))
+            return BlahIdentitySummary(id: profile.id.description, domain: profile.domains.first?.name ?? profile.id.description)
         }
     }
 
@@ -86,52 +97,89 @@ public actor BlahIdentityStore {
 
     public func create(domain: String, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
         try begin(); defer { finish() }
+        return try await create(domain: BlahProfileHost.domain(domain), hostingDomain: nil,
+            slot: slot, biometrics: biometrics, sync: sync)
+    }
+
+    public func createHosted(domain: String, label: String, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
+        try begin(); defer { finish() }
+        let host = try BlahProfileHost.domain(domain)
+        guard !label.contains("."), let name = DomainName(normalizing: label + "." + host.name) else {
+            throw BlahIdentityError.invalidProfile
+        }
+        let client = ProfileHostingClient(domain: host, http: BlahHostingHTTPClient())
+        _ = try await client.policy()
+        let hostedLabel = String(name.name.dropLast(host.name.count + 1))
+        switch try await client.name(hostedLabel).status {
+        case .available: break
+        case .claimed: throw ProfileHostingError.nameTaken(hostedLabel)
+        case .invalid: throw ProfileHostingError.invalidLabel(hostedLabel)
+        }
+        return try await create(domain: name, hostingDomain: host.name, slot: slot, biometrics: biometrics, sync: sync)
+    }
+
+    private func create(domain: DomainName, hostingDomain: String?, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
         guard let home = try self.home(slot: slot) else { throw BlahIdentityError.wrongHome }
         let (dc, _) = try await home.verified()
         let root = try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity))
         let device = try makeDevice()
-        let user = try UserProfile(home: Home(dc: dc.id, epoch: 1, expiresAt: backend.now + 180 * Self.day),
-            domains: [ProfileDomain(domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())])
-        let identity = try await Identity(data: user.encoded(), identityKey: root, deviceKey: device.key,
+        let user = HostedContent(home: Home(dc: dc.id, epoch: 1, expiresAt: backend.now + 180 * Self.day), domains: [domain])
+        let identity = try await BasicIdentity<AnyBlahProfile>(.user(user), identityKey: root, deviceKey: device.key,
             profileLifetime: 180 * Self.day, deviceLifetime: 180 * Self.day, using: backend)
-        let record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        var record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        record.hostingDomain = hostingDomain
         try await save(identity: identity, record: record)
         setSession(slot, identity: identity, record: record)
-        return try view(identity, record)
+        var current = try session(slot)
+        try await publishHosted(&current)
+        return try view(current.identity, current.record)
     }
 
     public func unlock(id: String, slot: String) async throws -> BlahIdentityView {
         try begin(); defer { finish() }
-        let record = try readRecord(id)
+        var record = try readRecord(id)
         let recipient = try EncryptionPrivateKey(secureEnclaveReference: record.encryptionReference)
         let root = try await SealedIdentityKey(encoding: Array(record.rootBox)).open(with: recipient, using: backend)
         let device = try DevicePrivateKey(PrivateKey(secureEnclaveReference: record.deviceReference, for: .device))
-        var identity = try await Identity(profile: Profile(encoding: Array(record.profile)), deviceKey: device, identityKey: root,
+        var identity = try await BasicIdentity<AnyBlahProfile>(profile: AnyBlahProfile(encoding: Array(record.profile)), deviceKey: device, identityKey: root,
             profileLifetime: record.profileDays * Self.day, deviceLifetime: record.deviceDays * Self.day, using: backend)
+        try requireAccount(identity.profile)
         // The hosted profile can revoke this device. Network errors do not rewrite the saved revision.
-        let domain = try UserProfile(identity.profile).domains[0].name
-        if let hosted = try? await BlahProfileHost.fetch(domain), let profile = try? Profile(encoding: Array(hosted)) {
+        let domain = identity.profile.domains[0].name
+        if let hosted = try? await BlahProfileHost.fetch(domain) {
+            let profile = try AnyBlahProfile(encoding: Array(hosted))
             try await profile.verify(using: backend, at: profile.validity.notBefore)
+            try requireAccount(profile)
             guard profile.id == identity.id else { throw BlahIdentityError.invalidProfile }
             if profile.generation > identity.profile.generation || profile.revision >= identity.profile.revision {
                 try BlahProfileHost.requireMonotonic(profile, after: identity.profile)
-                identity = try await Identity(profile: profile, deviceKey: device, identityKey: root,
+                identity = try await BasicIdentity<AnyBlahProfile>(profile: profile, deviceKey: device, identityKey: root,
                     profileLifetime: record.profileDays * Self.day, deviceLifetime: record.deviceDays * Self.day, using: backend)
             }
         }
-        if record.autoRenew && isRenewalDue(identity.profile) { try await renew(&identity) }
         try await save(identity: identity, record: record)
-        var current = record
-        current.profile = Data(identity.profile.encoding)
-        setSession(slot, identity: identity, record: current)
-        return try view(identity, current)
+        record.profile = Data(identity.profile.encoding)
+        setSession(slot, identity: identity, record: record)
+        var current = try session(slot)
+        // A failed PUT retains custody and the exact signed revision for an explicit retry.
+        // Never create a new revision until the preceding hosted publication is acknowledged.
+        do {
+            let shouldRenew = record.autoRenew && isRenewalDue(current.identity.profile)
+            try await publishHosted(&current, allowExpired: shouldRenew)
+            if shouldRenew {
+                try await renew(&current.identity)
+                try await persist(&current)
+                try await publishHosted(&current)
+            }
+        } catch { /* Unlock still exposes the durable profile and publication controls. */ }
+        return try view(current.identity, current.record)
     }
 
     public func lock() {
-        if isBusy { shouldLock = true; return }
-        sessions.removeAll()
         for task in renewalTasks.values { task.cancel() }
         renewalTasks.removeAll()
+        if isBusy { shouldLock = true; return }
+        sessions.removeAll()
     }
 
     public func inspect(slot: String) throws -> BlahIdentityView {
@@ -144,22 +192,52 @@ public actor BlahIdentityStore {
         let current = try session(slot)
         guard let home = try self.home(slot: slot) else { throw BlahIdentityError.wrongHome }
         let (profile, dc) = try await home.verified()
+        try await current.identity.profile.verify(using: backend)
+        guard current.identity.profile.home?.isActive(at: backend.now) == true else { throw BlahIdentityError.wrongHome }
         let namespace = try ClientNamespace(profile: current.identity.profile,
-            dc: DCAddress(domain: home.domain, id: profile.id), generation: dc.namespaceGeneration!)
+            dc: DCAddress(domain: try DomainName(home.domain), id: profile.id), generation: dc.namespaceGeneration!)
         if let saved = try BlahKeychain.read("binding:" + slot), saved != Data(namespace.identifier.utf8) {
             throw BlahIdentityError.wrongHome
         }
         try BlahKeychain.write("binding:" + slot, data: Data(namespace.identifier.utf8))
-        return try UserProfile(current.identity.profile).domains[0].name
+        try BlahKeychain.write("binding-v2:" + slot, data: JSONEncoder().encode(Binding(namespace: namespace.identifier,
+            identityID: current.identity.id.description, deviceID: Data(current.identity.deviceKey.publicKey.id.bytes))))
+        return current.identity.profile.domains[0].name
+    }
+
+    /// Stored MTProto authorizations must pass this check before reconnecting. A legacy
+    /// unbound slot is deliberately not adopted by whichever identity is selected next.
+    public func validateRestoredBinding(slot: String, required: Bool = true) async throws {
+        guard let data = try BlahKeychain.read("binding-v2:" + slot) else {
+            if !required, try BlahKeychain.read("binding:" + slot) == nil { return }
+            throw BlahIdentityError.wrongHome
+        }
+        guard let home = try self.home(slot: slot) else {
+            throw BlahIdentityError.wrongHome
+        }
+        let binding = try JSONDecoder().decode(Binding.self, from: data)
+        let profile = try AnyBlahProfile(encoding: Array(readRecord(binding.identityID).profile))
+        try requireAccount(profile)
+        try await profile.verify(using: backend)
+        let (dc, content) = try await home.verified()
+        guard let generation = content.namespaceGeneration else { throw BlahIdentityError.wrongHome }
+        let namespace = try ClientNamespace(profile: profile, dc: DCAddress(domain: DomainName(home.domain), id: dc.id), generation: generation)
+        guard profile.id.description == binding.identityID, namespace.identifier == binding.namespace,
+            profile.home?.isActive(at: backend.now) == true,
+            profile.device(try BlahDiem.Digest(bytes: Array(binding.deviceID))) != nil,
+            try BlahKeychain.read("binding:" + slot) == Data(namespace.identifier.utf8) else {
+            throw BlahIdentityError.wrongHome
+        }
     }
 
     public func prove(slot: String, challenge: Data, expires: Int32, query: Data, keyID: Int64, sessionID: Int64) async throws -> Data {
         try begin(); defer { finish() }
         let current = try session(slot)
         let parsed = try InvocationChallenge(encoding: Array(challenge))
-        let user = try UserProfile(current.identity.profile)
-        guard let home = user.home, home.isActive(at: backend.now), parsed.dc == home.dc,
-            parsed.domain == user.domains[0].name, parsed.transportKeyID == keyID,
+        let profile = current.identity.profile
+        try await profile.verify(using: backend)
+        guard let home = profile.home, home.isActive(at: backend.now), parsed.dc == home.dc,
+            parsed.domain == profile.domains[0], parsed.transportKeyID == keyID,
             parsed.sessionID == UInt64(bitPattern: sessionID), expires > 0, parsed.expiresAt == UInt64(expires) else {
             throw BlahIdentityError.invalidProfile
         }
@@ -169,21 +247,24 @@ public actor BlahIdentityStore {
     public func number(slot: String, account: Int64) async throws {
         try begin(); defer { finish() }
         var current = try session(slot)
-        var user = try UserProfile(current.identity.profile)
-        guard let home = user.home, home.account == nil || home.account == account else { throw BlahIdentityError.wrongHome }
+        try await publishHosted(&current)
+        guard let home = current.identity.profile.home, home.account == nil || home.account == account else { throw BlahIdentityError.wrongHome }
         if home.account == nil {
+            guard case .user(var user) = current.identity.profile.content else { throw BlahIdentityError.invalidProfile }
             user.home?.account = account
-            try await current.identity.update(user)
-            try await save(identity: current.identity, record: current.record)
-            current.record.profile = Data(current.identity.profile.encoding)
-            sessions[slot] = current
+            try await current.identity.update(.user(user))
+            try await persist(&current)
+            try await publishHosted(&current)
         }
         try await requirePublication(current.identity.profile)
+        current.record.publishedProfile = Data(current.identity.profile.encoding)
+        current.record.checkedProfile = current.record.publishedProfile
+        try await persist(&current)
     }
 
     public enum Change: Sendable {
         case renew
-        case domains([ProfileDomain])
+        case domains([DomainName])
         case addDevice(Data)
         case removeDevice(BlahDiem.Digest)
         case renewal(profileDays: UInt64, deviceDays: UInt64, automatic: Bool)
@@ -194,19 +275,34 @@ public actor BlahIdentityStore {
     public func change(slot: String, change: Change) async throws -> BlahIdentityView {
         try begin(); defer { finish() }
         var current = try session(slot)
+        let publishes: Bool
+        switch change {
+        case .renew:
+            publishes = true
+            try await publishHosted(&current, allowExpired: true)
+        case .domains, .addDevice, .removeDevice:
+            publishes = true
+            try await publishHosted(&current)
+        case .renewal, .sync, .biometrics:
+            publishes = false
+        }
         switch change {
         case .renew: try await renew(&current.identity)
         case let .domains(domains):
-            var user = try UserProfile(current.identity.profile)
             guard !domains.isEmpty else { throw BlahIdentityError.invalidProfile }
-            user.domains = domains
-            try await current.identity.update(user)
+            // Keep at least one route through the selected host so publication remains
+            // retryable; moving hosts is a separate custody workflow.
+            if let host = current.record.hostingDomain,
+                !domains.contains(where: { $0.name.hasSuffix("." + host) && !$0.name.dropLast(host.count + 1).contains(".") }) {
+                throw BlahIdentityError.invalidProfile
+            }
+            try await current.identity.update(current.identity.profile.content.replacingDomains(domains))
         case let .addDevice(data): try await current.identity.add(DevicePublicKey(PublicKey(encoding: Array(data))))
         case let .removeDevice(id): try await current.identity.remove(id)
         case let .renewal(profileDays, deviceDays, automatic):
             guard profileDays > 0, deviceDays >= profileDays, deviceDays < 36500 else { throw BlahIdentityError.invalidProfile }
             current.record.profileDays = profileDays; current.record.deviceDays = deviceDays; current.record.autoRenew = automatic
-            current.identity = try await Identity(profile: current.identity.profile, deviceKey: current.identity.deviceKey,
+            current.identity = try await BasicIdentity<AnyBlahProfile>(profile: current.identity.profile, deviceKey: current.identity.deviceKey,
                 identityKey: current.identity.identityKey, profileLifetime: profileDays * Self.day,
                 deviceLifetime: deviceDays * Self.day, using: backend)
         case let .sync(enabled):
@@ -218,17 +314,32 @@ public actor BlahIdentityStore {
             current.record = Record(profile: record.profile, rootBox: record.rootBox,
                 encryptionReference: record.encryptionReference, deviceReference: record.deviceReference,
                 biometrics: enabled, sync: record.sync, profileDays: current.record.profileDays,
-                deviceDays: current.record.deviceDays, autoRenew: current.record.autoRenew)
+                deviceDays: current.record.deviceDays, autoRenew: current.record.autoRenew,
+                hostingDomain: current.record.hostingDomain, publishedProfile: current.record.publishedProfile,
+                checkedProfile: current.record.checkedProfile)
         }
-        try await save(identity: current.identity, record: current.record)
-        current.record.profile = Data(current.identity.profile.encoding)
-        sessions[slot] = current
+        try await persist(&current)
+        if publishes { try await publishHosted(&current) }
         return try view(current.identity, current.record)
     }
 
     public func checkPublication(slot: String) async throws {
-        let profile = try session(slot).identity.profile
-        try await requirePublication(profile)
+        try begin(); defer { finish() }
+        var current = try session(slot)
+        try await requirePublication(current.identity.profile)
+        current.record.publishedProfile = Data(current.identity.profile.encoding)
+        current.record.checkedProfile = current.record.publishedProfile
+        try await persist(&current)
+    }
+
+    public func publish(slot: String) async throws {
+        try begin(); defer { finish() }
+        var current = try session(slot)
+        try await publishHosted(&current)
+        try await requirePublication(current.identity.profile)
+        current.record.publishedProfile = Data(current.identity.profile.encoding)
+        current.record.checkedProfile = current.record.publishedProfile
+        try await persist(&current)
     }
 
     public func restoreCloud(id: String, slot: String, biometrics: Bool) async throws -> BlahIdentityView {
@@ -240,7 +351,15 @@ public actor BlahIdentityStore {
     public func exportRecovery(slot: String, password: String) async throws -> Data {
         let current = try session(slot)
         guard let root = current.identity.identityKey else { throw BlahIdentityError.locked }
-        return try await BlahRecoveryFile.seal(profile: current.identity.profile, identityKey: root, password: password)
+        var metadata: [UInt64: CBOR] = [0: .text(current.identity.profile.domains[0].name),
+            3: .unsigned(current.record.profileDays), 4: .unsigned(current.record.deviceDays),
+            5: .bool(current.record.autoRenew)]
+        if let host = current.record.hostingDomain {
+            let client = ProfileHostingClient(domain: try DomainName(host), http: BlahHostingHTTPClient())
+            metadata[7] = .record([0: .text(host), 1: .array(client.labels(in: current.identity.profile).map(CBOR.text)), 2: .array([])])
+        }
+        return try await BlahRecoveryFile.seal(profile: current.identity.profile, identityKey: root, password: password,
+            metadata: .record(metadata))
     }
 
     public func importRecovery(_ data: Data, password: String, slot: String, biometrics: Bool) async throws -> BlahIdentityView {
@@ -248,7 +367,13 @@ public actor BlahIdentityStore {
         guard let root = contents.keys.first(where: { $0.publicKey.purpose == .identity }) else {
             throw BlahIdentityError.invalidProfile
         }
-        let recovery = Recovery(version: 1, secret: Data(root.secret), profile: Data(contents.profile.encoding))
+        let metadata = try contents.metadata.recordValue(requiredKeys: 0..<0)
+        let hosting = try metadata[7].map { try $0.recordValue(requiredKeys: 0..<3)[0]!.textValue() }
+        if let hosting {
+            let host = ProfileHostingClient(domain: try DomainName(hosting), http: BlahHostingHTTPClient())
+            guard !host.labels(in: contents.profile).isEmpty else { throw BlahIdentityError.invalidProfile }
+        }
+        let recovery = Recovery(version: 1, secret: Data(root.secret), profile: Data(contents.profile.encoding), hostingDomain: hosting)
         return try await restoreRecovery(JSONEncoder().encode(recovery), slot: slot, biometrics: biometrics, sync: false)
     }
 
@@ -257,26 +382,43 @@ public actor BlahIdentityStore {
         guard data.count <= 600000 else { throw BlahIdentityError.invalidProfile }
         let recovery = try JSONDecoder().decode(Recovery.self, from: data)
         guard recovery.version == 1 else { throw BlahIdentityError.invalidProfile }
-        let saved = try Profile(encoding: Array(recovery.profile))
+        let saved = try AnyBlahProfile(encoding: Array(recovery.profile))
+        try requireAccount(saved)
         guard try BlahKeychain.read("identity:" + saved.id.description) == nil else { throw BlahIdentityError.duplicate }
         let root = try await IdentityPrivateKey(backend.makePrivateKey(saved.identityKey.key.algorithm, for: .identity, restoring: Array(recovery.secret)))
-        let domain = try UserProfile(saved).domains[0].name
-        let profile = try Profile(encoding: Array(try await BlahProfileHost.fetch(domain)))
+        let domain = saved.domains[0].name
+        let profile = try AnyBlahProfile(encoding: Array(try await BlahProfileHost.fetch(domain)))
+        try requireAccount(profile)
         try await profile.verify(using: backend, at: profile.validity.notBefore)
         try BlahProfileHost.requireMonotonic(profile, after: saved)
         let device = try makeDevice()
-        var identity = try await Identity.enrolling(device.key, in: profile, identityKey: root,
+        var identity = try await BasicIdentity<AnyBlahProfile>.enrolling(device.key, in: profile, identityKey: root,
             profileLifetime: 180 * Self.day, deviceLifetime: 180 * Self.day, using: backend)
         try await renew(&identity)
-        let record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        var record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        record.hostingDomain = recovery.hostingDomain
         try await save(identity: identity, record: record)
         setSession(slot, identity: identity, record: record)
-        return try view(identity, record)
+        var current = try session(slot)
+        try await publishHosted(&current)
+        return try view(current.identity, current.record)
     }
 
     private func readRecord(_ id: String) throws -> Record {
         guard let data = try BlahKeychain.read("identity:" + id) else { throw BlahIdentityError.locked }
-        return try JSONDecoder().decode(Record.self, from: data)
+        let record = try JSONDecoder().decode(Record.self, from: data)
+        guard record.profileDays > 0, record.deviceDays >= record.profileDays, record.deviceDays < 36500 else {
+            throw BlahIdentityError.invalidProfile
+        }
+        return record
+    }
+
+    private func requireAccount(_ profile: AnyBlahProfile) throws {
+        guard !profile.domains.isEmpty else { throw BlahIdentityError.invalidProfile }
+        switch profile {
+        case .user, .dc: break
+        default: throw BlahIdentityError.invalidProfile
+        }
     }
 
     private func makeDevice() throws -> (key: DevicePrivateKey, reference: Data) {
@@ -295,7 +437,7 @@ public actor BlahIdentityStore {
         return control
     }
 
-    private func makeRecord(identity: Identity, deviceReference: Data, biometrics: Bool, sync: Bool) async throws -> Record {
+    private func makeRecord(identity: BasicIdentity<AnyBlahProfile>, deviceReference: Data, biometrics: Bool, sync: Bool) async throws -> Record {
         guard let root = identity.identityKey else { throw BlahIdentityError.locked }
         let recipient = try EncryptionPrivateKey.secureEnclave(accessControl: accessControl(biometrics: biometrics))
         let sealed = try await root.sealed(to: recipient.key.publicKey, using: backend)
@@ -303,7 +445,7 @@ public actor BlahIdentityStore {
             encryptionReference: recipient.reference, deviceReference: deviceReference, biometrics: biometrics, sync: sync)
     }
 
-    private func save(identity: Identity, record: Record) async throws {
+    private func save(identity: BasicIdentity<AnyBlahProfile>, record: Record) async throws {
         var record = record
         record.profile = Data(identity.profile.encoding)
         try BlahKeychain.write("identity:" + identity.id.description, data: JSONEncoder().encode(record))
@@ -311,13 +453,35 @@ public actor BlahIdentityStore {
             sessions[slot] = Session(identity: identity, record: record, expires: current.expires)
         }
         if record.sync, let secret = identity.identityKey?.rawRepresentation {
-            let recovery = Recovery(version: 1, secret: Data(secret), profile: record.profile)
+            let recovery = Recovery(version: 1, secret: Data(secret), profile: record.profile, hostingDomain: record.hostingDomain)
             try BlahKeychain.write("recovery:" + identity.id.description, data: JSONEncoder().encode(recovery), sync: true)
         }
     }
 
+    private func persist(_ current: inout Session) async throws {
+        current.record.profile = Data(current.identity.profile.encoding)
+        try await save(identity: current.identity, record: current.record)
+    }
+
+    /// Every caller saves first, and retries this exact revision before signing another.
+    /// A host cannot accept expired bytes: renewal may supersede that saved revision,
+    /// retaining its revision chain, rather than blocking recovery on an impossible PUT.
+    private func publishHosted(_ current: inout Session, allowExpired: Bool = false) async throws {
+        guard let domain = current.record.hostingDomain,
+            current.record.publishedProfile != Data(current.identity.profile.encoding) else { return }
+        if allowExpired, ([current.identity.profile.validity] + current.identity.profile.devices.map(\.validity))
+            .contains(where: { $0.expiresAt <= backend.now }) { return }
+        let host = ProfileHostingClient(domain: try DomainName(domain), http: BlahHostingHTTPClient())
+        try await host.publish(current.identity.profile, solver: BlahHostingProofOfWork())
+        current.record.publishedProfile = Data(current.identity.profile.encoding)
+        try await persist(&current)
+        try await requirePublication(current.identity.profile)
+        current.record.checkedProfile = current.record.publishedProfile
+        try await persist(&current)
+    }
+
     private func session(_ slot: String, touch: Bool = true) throws -> Session {
-        guard var current = sessions[slot], current.expires > backend.now else {
+        guard !shouldLock, var current = sessions[slot], current.expires > backend.now else {
             sessions.removeValue(forKey: slot)
             renewalTasks.removeValue(forKey: slot)?.cancel()
             throw BlahIdentityError.locked
@@ -326,7 +490,7 @@ public actor BlahIdentityStore {
         return current
     }
 
-    private func setSession(_ slot: String, identity: Identity, record: Record) {
+    private func setSession(_ slot: String, identity: BasicIdentity<AnyBlahProfile>, record: Record) {
         sessions[slot] = Session(identity: identity, record: record, expires: backend.now + Self.timeout)
         renewalTasks[slot]?.cancel()
         renewalTasks[slot] = Task { [weak self] in
@@ -341,40 +505,43 @@ public actor BlahIdentityStore {
         guard !isBusy, var current = try? session(slot, touch: false) else { return }
         isBusy = true; defer { finish() }
         do {
-            if current.record.autoRenew && isRenewalDue(current.identity.profile) {
+            let shouldRenew = current.record.autoRenew && isRenewalDue(current.identity.profile)
+            try await publishHosted(&current, allowExpired: shouldRenew)
+            if shouldRenew {
                 try await renew(&current.identity)
-                try await save(identity: current.identity, record: current.record)
-                current.record.profile = Data(current.identity.profile.encoding)
-                sessions[slot] = current
+                try await persist(&current)
+                try await publishHosted(&current)
             }
         } catch { /* The current signed revision stays available for explicit retry. */ }
     }
 
-    private func isRenewalDue(_ profile: Profile) -> Bool {
+    private func isRenewalDue(_ profile: AnyBlahProfile) -> Bool {
         return ([profile.validity] + profile.devices.map(\.validity)).contains {
-            backend.now >= $0.notBefore + ($0.expiresAt - $0.notBefore) * 4 / 5
+            backend.now >= $0.expiresAt - ($0.expiresAt - $0.notBefore) / 5
         }
     }
 
-    private func renew(_ identity: inout Identity) async throws {
-        var user = try UserProfile(identity.profile)
-        user.home?.expiresAt = backend.now + identity.deviceLifetime
+    private func renew(_ identity: inout BasicIdentity<AnyBlahProfile>) async throws {
         try await identity.renew()
-        try await identity.update(user)
+        if case .user(var user) = identity.profile.content {
+            user.home?.expiresAt = backend.now + identity.deviceLifetime
+            try await identity.update(.user(user))
+        }
     }
 
-    private func requirePublication(_ profile: Profile) async throws {
-        for domain in try UserProfile(profile).domains {
+    private func requirePublication(_ profile: AnyBlahProfile) async throws {
+        for domain in profile.domains {
             guard try await BlahProfileHost.fetch(domain.name) == Data(profile.encoding) else {
                 throw BlahIdentityError.publicationRequired
             }
         }
     }
 
-    private func view(_ identity: Identity, _ record: Record) throws -> BlahIdentityView {
-        return BlahIdentityView(id: identity.id.description, profile: identity.profile, user: try UserProfile(identity.profile),
+    private func view(_ identity: BasicIdentity<AnyBlahProfile>, _ record: Record) throws -> BlahIdentityView {
+        return BlahIdentityView(id: identity.id.description, profile: identity.profile, user: HostedContent(home: identity.profile.home, domains: identity.profile.domains),
             device: identity.deviceKey.publicKey, biometrics: record.biometrics, sync: record.sync,
-            profileDays: record.profileDays, deviceDays: record.deviceDays, autoRenew: record.autoRenew)
+            profileDays: record.profileDays, deviceDays: record.deviceDays, autoRenew: record.autoRenew,
+            hostingDomain: record.hostingDomain, publicationPending: record.checkedProfile != Data(identity.profile.encoding))
     }
 
     private func begin() throws {

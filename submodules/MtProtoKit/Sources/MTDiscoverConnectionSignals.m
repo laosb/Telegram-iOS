@@ -261,7 +261,7 @@
 {
     MTSocksProxySettings *proxySettings = context.apiEnvironment.socksProxySettings;
     NSArray<MTDatacenterAddress *> *bestAddressList = [self probeAddressesForAddressList:addressList media:media isProxy:isProxy proxySettings:proxySettings];
-    NSArray<NSNumber *> *alternatePorts = [self alternatePortsForProxySettings:proxySettings];
+    NSArray<NSNumber *> *alternatePorts = context.hasPinnedDatacenterConfiguration ? @[] : [self alternatePortsForProxySettings:proxySettings];
 
     NSMutableArray *bestTcp4Signals = [[NSMutableArray alloc] init];
     NSMutableArray *bestTcp6Signals = [[NSMutableArray alloc] init];

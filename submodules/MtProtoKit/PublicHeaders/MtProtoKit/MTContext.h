@@ -102,6 +102,11 @@
 // Replaces bound temporary keys this process uses before they expire. Off by default; app extensions keep it off.
 @property (nonatomic) bool refreshesTemporaryKeys;
 
+// Explicit trust configuration excludes cached/server addresses, keys and discovery fallbacks.
+// Installing empty dictionaries keeps the context closed until verified pins are available.
+@property (nonatomic, readonly) bool hasPinnedDatacenterConfiguration;
+- (void)setPinnedDatacenterAddresses:(NSDictionary<NSNumber *, MTDatacenterAddressSet *> * _Nonnull)addresses publicKeys:(NSDictionary<NSNumber *, NSArray<NSDictionary *> *> * _Nonnull)publicKeys;
+
 @property (nonatomic, copy) id<MTTcpConnectionInterface> _Nonnull (^ _Nullable makeTcpConnectionInterface)(id<MTTcpConnectionInterfaceDelegate> _Nonnull delegate, dispatch_queue_t _Nonnull delegateQueue);
 
 + (int32_t)fixedTimeDifference;

@@ -5,14 +5,15 @@ import DiemSwiftCrypto
 
 @available(iOS 18.0, macOS 15.0, *)
 enum BlahRecoveryFile {
-    static func seal(profile: Profile, identityKey: IdentityPrivateKey, password: String) async throws -> Data {
+    static func seal(profile: AnyBlahProfile, identityKey: IdentityPrivateKey, password: String,
+        metadata: CBOR = .map([:])) async throws -> Data {
         guard let secret = identityKey.rawRepresentation else { throw BlahIdentityError.locked }
         let backend = SwiftCryptoBackend()
         let salt = backend.randomBytes(count: 16)
         let recipient = try await KeyFile.passwordRecipient(password, salt: salt, using: backend, pbkdf2: derivePassword)
         let contents = try KeyFileContents(profile: profile, keys: [
             KeyFilePrivateKey(publicKey: identityKey.publicKey.key, secret: secret)
-        ])
+        ], metadata: metadata)
         return Data(try await KeyFile.seal(contents, salt: salt, to: recipient.publicKey, using: backend).encoding)
     }
 
@@ -25,6 +26,7 @@ enum BlahRecoveryFile {
     }
 
     private static func derivePassword(_ password: [UInt8], _ salt: [UInt8], _ iterations: UInt32) async throws -> [UInt8] {
+        try Task.checkCancellation()
         var derived = [UInt8](repeating: 0, count: 32)
         let status = derived.withUnsafeMutableBytes { output in
             salt.withUnsafeBytes { saltBytes in
@@ -38,6 +40,7 @@ enum BlahRecoveryFile {
             }
         }
         guard status == kCCSuccess else { throw BlahIdentityError.invalidProfile }
+        try Task.checkCancellation()
         return derived
     }
 }

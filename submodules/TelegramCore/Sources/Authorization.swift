@@ -271,6 +271,15 @@ public func sendAuthorizationCode(accountManager: AccountManager<TelegramAccount
                     switch sentCode {
                     case let .sentCode(sentCodeData):
                         let (type, phoneCodeHash, nextType, codeTimeout) = (sentCodeData.type, sentCodeData.phoneCodeHash, sentCodeData.nextType, sentCodeData.timeout)
+                        // Blah uses this sentinel when signup requires no admission email.
+                        // There is no code to enter; retain the hash for proof-wrapped signUp.
+                        if case let .sentCodeTypeApp(value) = type, value.length == 0, phoneCodeHash == "diem" {
+                            transaction.setState(UnauthorizedAccountState(isTestingEnvironment: account.testingEnvironment,
+                                masterDatacenterId: account.masterDatacenterId, contents: .signUp(number: phoneNumber,
+                                codeHash: phoneCodeHash, firstName: "", lastName: "", termsOfService: nil,
+                                syncContacts: syncContacts)))
+                            return .single(.sentCode(account))
+                        }
                         let parsedType = SentAuthorizationCodeType(apiType: type)
                         var parsedNextType: AuthorizationCodeNextType?
                         if let nextType = nextType {

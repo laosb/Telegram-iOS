@@ -13,14 +13,17 @@ ML-DSA requires iOS 26. Its identity, database generation and signed version are
 pinned per account; another home or identity requires another account slot. Unbound
 legacy transport sessions require a fresh account.
 
-Create an identity for a domain you can host, or import a password-encrypted identity
-file. Shared BlahDiem CBOR/HPKE files containing identity recovery authority are accepted;
-device-only files and JSON backups are unsupported.
-Publish the exported public `profile.cbor` at every listed HTTPS domain with content type
-`application/cbor`. Sign in with the identity; supply an admission email if the DC requires
-one. Signup saves the allocated account number into the profile. Publish that updated
-file and sign in again to finish admission. Identity Manager also manages domains,
-devices, profile validity and renewal; publish every authority change.
+Create a name on a Diem profile host, use a domain you host yourself, or import a
+password-encrypted identity file. Shared BlahDiem CBOR/HPKE files containing identity
+recovery authority are accepted; device-only files and JSON backups are unsupported.
+Hosted identities publish automatically after changes and signup; failed publication
+retains the signed revision and can be retried in Identity Manager. For your own domains,
+publish the exported public `profile.cbor` at every listed HTTPS domain with content type
+`application/cbor`, including the updated account number after signup, then sign in again.
+Sign-in first uses the identity domain. Admission email appears only when the DC asks for
+it; signup without email goes straight to the name form. Existing email-code and two-step
+password screens complete the DC's additional factors. Identity Manager also manages
+domains, devices, profile validity and renewal; publish every authority change.
 
 Identity custody lives in Keychain independently of chat storage. Native BlahDiem uses
 Secure Enclave P-256 device keys and seals the Ed25519 recovery key to another Secure
@@ -32,7 +35,7 @@ key and profile, not the hardware device keys. Recovery fetches the latest hoste
 enrolls a fresh Secure Enclave device, and requires publication. Native recovery exports
 are for native recovery; they do not export the hardware device key as a browser identity.
 Custody locks when leaving management, on backgrounding, or after 15 idle minutes;
-continuing sign-in retains it until that flow finishes or the idle/background lock applies.
+continuing sign-in retains it subject to the same idle and background locks.
 Automatic renewal runs only while unlocked. Creation and recovery require real Secure
 Enclave hardware; the simulator has no software-key fallback.
 
@@ -48,12 +51,17 @@ upstream Swift package dependencies. Their revisions live in
 [Package.resolved](build-system/SwiftPackages/Package.resolved) locks the transitive graph.
 [MODULE.bazel](MODULE.bazel) imports the package products through
 `rules_swift_package_manager` for both app builds and generated Xcode projects.
+The current integration requires Swift 6.4; Xcode and Bazel versions are pinned in
+`versions.json`. Signed-home connections use MTProtoKit until the alternative engine
+supports the same device-proof binding and signed endpoint/RSA pin contract. Saved
+authorizations are checked against the identity, device and cache namespace before
+reconnecting; legacy slots without that binding require a fresh account slot.
 
 To update a revision, edit the manifest, then regenerate both lockfiles:
 
 ```sh
 swift package --package-path build-system/SwiftPackages resolve
-build-input/bazel-8.4.2-darwin-arm64 mod deps
+build-input/bazel-9.2.0-darwin-arm64 mod deps
 ```
 
 Recovery exports use BlahDiem’s `KeyFile` API and the platform PBKDF2 adapter; hardware
@@ -62,7 +70,10 @@ The [package integration tests](build-system/SwiftPackages/Tests/BlahDiemPackage
 exercise profile encoding and sealed-key recovery against the fetched packages:
 
 ```sh
-build-input/bazel-8.4.2-darwin-arm64 test //build-system/SwiftPackages:BlahDiemPackageTests \
+swift test --package-path build-system/SwiftPackages
+
+# Or through Bazel on macOS:
+build-input/bazel-9.2.0-darwin-arm64 test //build-system/SwiftPackages:BlahDiemPackageTests \
   --apple_platform_type=macos --macos_minimum_os=15.0
 ```
 

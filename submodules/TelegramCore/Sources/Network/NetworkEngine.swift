@@ -231,6 +231,8 @@ public protocol NetworkEngineRequestService: AnyObject {
 public protocol NetworkEngineSession: AnyObject {
     var datacenterId: Int { get }
     var requestService: NetworkEngineRequestService { get }
+    /// Current wire auth-key and session identifiers, without key material. Zero means unavailable.
+    func identityBinding(_ reply: @escaping (Int64, Int64) -> Void)
     /// Sessions are created paused. Pausing drops the transport; resuming reconnects.
     func setPaused(_ paused: Bool)
     /// The user is actively using the account (app in the foreground, primary account). An engine
@@ -258,6 +260,10 @@ public protocol NetworkEngineSession: AnyObject {
 }
 
 public extension NetworkEngineSession {
+    func identityBinding(_ reply: @escaping (Int64, Int64) -> Void) {
+        reply(0, 0)
+    }
+
     func observeConnectionDrops(_ observer: @escaping (NetworkEngineConnectionDrop) -> Void) {
     }
 

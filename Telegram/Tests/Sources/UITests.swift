@@ -30,6 +30,44 @@ class UITests: XCTestCase {
         XCTAssert(app.wait(for: .runningForeground, timeout: 10.0))
     }
 
+    func testBlahIdentitySetupStartsWithDC() throws {
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        let chooseIdentity = app.buttons["Auth.PhoneEntry.ContinueButton"]
+        XCTAssert(chooseIdentity.waitForExistence(timeout: 10.0))
+        chooseIdentity.tap()
+        XCTAssert(app.navigationBars["Identity Manager"].waitForExistence(timeout: 5.0))
+
+        // Admission is a server-requested signup step, not the first login field.
+        XCTAssertFalse(app.textFields["Admission email"].exists)
+        let connect = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Connect to home DC")).firstMatch
+        XCTAssert(connect.waitForExistence(timeout: 5.0))
+        connect.tap()
+        let dcPrompt = app.alerts["Connect to home DC"]
+        XCTAssert(dcPrompt.waitForExistence(timeout: 5.0))
+        XCTAssert(dcPrompt.textFields.firstMatch.exists)
+        dcPrompt.textFields.firstMatch.tap()
+        dcPrompt.textFields.firstMatch.typeText("dc.example.org")
+        dcPrompt.buttons["Cancel"].tap()
+
+        // Cancelling discovery keeps the manager usable and does not enable
+        // creation against a DC that has never been verified.
+        let hosted = app.buttons["Create with a hosted name"]
+        for _ in 0..<5 where !hosted.exists { app.swipeUp() }
+        XCTAssert(hosted.exists)
+        XCTAssertFalse(hosted.isEnabled)
+        let ownDomain = app.buttons["Create on your own domain"]
+        XCTAssert(ownDomain.exists)
+        XCTAssertFalse(ownDomain.isEnabled)
+
+        app.navigationBars["Identity Manager"].buttons.firstMatch.tap()
+        XCTAssert(chooseIdentity.waitForExistence(timeout: 5.0))
+        chooseIdentity.tap()
+        XCTAssert(app.navigationBars["Identity Manager"].waitForExistence(timeout: 5.0))
+        XCTAssert(connect.waitForExistence(timeout: 5.0))
+    }
+
     func testSignUp() throws {
         deleteTestAccount(phone: "9996625296")
         app.launch()

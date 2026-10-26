@@ -97,6 +97,10 @@ private final class RecordingNetworkEngineSession: NetworkEngineSession {
         return self.service
     }
 
+    func identityBinding(_ reply: @escaping (Int64, Int64) -> Void) {
+        self.session.identityBinding(reply)
+    }
+
     func setPaused(_ paused: Bool) {
         if self.role == .main {
             self.telemetry.setSuspended(paused)

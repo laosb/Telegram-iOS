@@ -56,6 +56,8 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         }
     }
     public var loginWithNumber: ((String, Bool) -> Void)?
+    private var identitySignInFailed: ((String) -> Void)?
+    var cancelIdentitySignIn: (() -> Void)?
     public var loginWithPasskey: ((AuthorizationPasskeyData, Bool) -> Void)?
     var accountUpdated: ((UnauthorizedAccount) -> Void)?
     
@@ -386,6 +388,13 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         self.confirmationController?.dismissAnimated()
         self.confirmationController = nil
     }
+
+    func handleBlahIdentitySignInError(_ error: String) -> Bool {
+        guard let failed = self.identitySignInFailed else { return false }
+        self.identitySignInFailed = nil
+        failed(error)
+        return true
+    }
     
     @objc func nextPressed() {
         guard !self.inProgress, self.confirmationController == nil else {
@@ -393,9 +402,13 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         }
         if let account = self.account {
             let identityController = blahIdentityController(network: account.network, presentationData: self.presentationData,
-                signIn: { [weak self] domain in
+                signIn: { [weak self] domain, failed in
                     guard let self else { return }
+                    self.identitySignInFailed = failed
                     self.loginWithNumber?(domain, false)
+                }, cancelSignIn: { [weak self] in
+                    self?.cancelIdentitySignIn?()
+                    self?.identitySignInFailed = nil
                 })
             (self.navigationController as? NavigationController)?.pushViewController(identityController)
             return
