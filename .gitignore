@@ -86,6 +86,4 @@ submodules/TelegramApi/ObjC/SwiftPMGenerated/
 submodules/TelegramApi/Tests/SwiftPMGenerated/
 build-system/blah-codesigning
 build-system/blah-appstore-configuration.json
-build-system/blah-server.config.json
-submodules/TelegramCore/Sources/Network/CustomDCConfigGenerated.swift
 /logs

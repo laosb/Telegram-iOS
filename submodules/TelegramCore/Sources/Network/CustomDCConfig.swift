@@ -1,8 +1,6 @@
 import Foundation
 import MtProtoKit
 
-// _customDCConfigData is provided by CustomDCConfigGenerated.swift (auto-generated at build time).
-
 public struct CustomDCConfig {
     public struct DC {
         public let id: Int
@@ -16,16 +14,11 @@ public struct CustomDCConfig {
         }
     }
 
-    public let defaultDcId: Int
     public let dcs: [DC]
 
-    public init(defaultDcId: Int, dcs: [DC]) {
-        self.defaultDcId = defaultDcId
+    public init(dcs: [DC]) {
         self.dcs = dcs
     }
-
-    /// The active custom DC config, or `nil` when running against the standard Telegram network.
-    public static var shared: CustomDCConfig? { _customDCConfigData }
 
     /// Each independently pinned Blah home occupies DC 1 in its own account slot.
     public static var initialDatacenterId: Int { 1 }

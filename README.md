@@ -7,11 +7,15 @@ There are several things we require from **all developers** for the moment.
 
 This fork requires iOS 18 or later. **Choose identity** opens the native Identity Manager,
 also available in Settings. Connect to your home DC domain before creating an identity.
+The app embeds no DC list; it discovers each account's home from the domain you enter.
 The DC publishes its signed profile at `/.well-known/blah/profile.cbor` and advertises a
 plain TCP MTProto endpoint. iOS 18–25 supports Ed25519/P-256 DC profile signatures;
 ML-DSA requires iOS 26. Its identity, database generation and signed version are
 pinned per account; another home or identity requires another account slot. Unbound
 legacy transport sessions require a fresh account.
+On launch, the main app refreshes the home profile. If the domain is unreachable, it keeps
+the saved home only if it still verifies; any returned profile that fails verification or
+is older is rejected. Extensions reuse the saved verified home without contacting the profile domain.
 
 Create a name on a Diem profile host, use a domain you host yourself, or import a
 password-encrypted identity file. Shared BlahDiem CBOR/HPKE files containing identity
@@ -54,8 +58,7 @@ upstream Swift package dependencies. Their revisions live in
 The current integration requires Swift 6.4; Xcode and Bazel versions are pinned in
 `versions.json`. Signed-home connections use MTProtoKit until the alternative engine
 supports the same device-proof binding and signed endpoint/RSA pin contract. Saved
-authorizations are checked against the identity, device and cache namespace before
-reconnecting; legacy slots without that binding require a fresh account slot.
+authorizations are checked against the identity, device and cache namespace before reconnecting.
 
 To update a revision, edit the manifest, then regenerate both lockfiles:
 

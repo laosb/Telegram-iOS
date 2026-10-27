@@ -27,8 +27,16 @@ public struct BlahIdentityView: Sendable {
 
 @available(iOS 18.0, macOS 15.0, *)
 public actor BlahIdentityStore {
-    public static let shared = BlahIdentityStore()
+    public static let shared: BlahIdentityStore = {
+        let isAppExtension = Bundle.main.bundlePath.hasSuffix(".appex")
+        var baseAppBundleId = Bundle.main.bundleIdentifier!
+        if isAppExtension, let dot = baseAppBundleId.range(of: ".", options: .backwards) {
+            baseAppBundleId = String(baseAppBundleId[..<dot.lowerBound])
+        }
+        return BlahIdentityStore(accessGroup: "group." + baseAppBundleId, isAppExtension: isAppExtension)
+    }()
     private let backend = SwiftCryptoBackend()
+    private let restoreKeychain: BlahRestoreKeychain
     private var sessions: [String: Session] = [:]
     private var renewalTasks: [String: Task<Void, Never>] = [:]
     private var isBusy = false
@@ -60,11 +68,16 @@ public actor BlahIdentityStore {
         let namespace: String
         let identityID: String
         let deviceID: Data
+        var profile: Data?
     }
     private struct Session {
         var identity: BasicIdentity<AnyBlahProfile>
         var record: Record
         var expires: UInt64
+    }
+
+    init(accessGroup: String, isAppExtension: Bool) {
+        restoreKeychain = BlahRestoreKeychain(accessGroup: accessGroup, isAppExtension: isAppExtension)
     }
 
     public func list() throws -> [BlahIdentitySummary] {
@@ -84,15 +97,36 @@ public actor BlahIdentityStore {
     }
 
     public func home(slot: String) throws -> BlahHome? {
-        guard let data = try BlahKeychain.read("home:" + slot) else { return nil }
+        guard let data = try restoreKeychain.read("home:" + slot) else { return nil }
         return try JSONDecoder().decode(BlahHome.self, from: data)
     }
 
     public func connect(domain: String, slot: String) async throws -> BlahHome {
         try begin(); defer { finish() }
         let home = try await BlahHome.discover(domain, previous: self.home(slot: slot))
-        try BlahKeychain.write("home:" + slot, data: JSONEncoder().encode(home))
+        try restoreKeychain.write("home:" + slot, data: JSONEncoder().encode(home))
         return home
+    }
+
+    public func restoreHome(slot: String, refresh: Bool) async throws -> BlahHome? {
+        guard let saved = try home(slot: slot) else { return nil }
+        if !refresh {
+            _ = try await saved.verified()
+            return saved
+        }
+        try begin(); defer { finish() }
+        let home = try await BlahHome.discover(saved.domain, previous: saved, allowOffline: true)
+        try restoreKeychain.write("home:" + slot, data: JSONEncoder().encode(home))
+        return home
+    }
+
+    public func remove(slot: String) throws {
+        try begin(); defer { finish() }
+        for prefix in ["home:", "binding-v2:", "binding:"] {
+            try restoreKeychain.remove(prefix + slot)
+        }
+        sessions.removeValue(forKey: slot)
+        renewalTasks.removeValue(forKey: slot)?.cancel()
     }
 
     public func create(domain: String, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
@@ -196,27 +230,35 @@ public actor BlahIdentityStore {
         guard current.identity.profile.home?.isActive(at: backend.now) == true else { throw BlahIdentityError.wrongHome }
         let namespace = try ClientNamespace(profile: current.identity.profile,
             dc: DCAddress(domain: try DomainName(home.domain), id: profile.id), generation: dc.namespaceGeneration!)
-        if let saved = try BlahKeychain.read("binding:" + slot), saved != Data(namespace.identifier.utf8) {
+        if let saved = try restoreKeychain.read("binding:" + slot), saved != Data(namespace.identifier.utf8) {
             throw BlahIdentityError.wrongHome
         }
-        try BlahKeychain.write("binding:" + slot, data: Data(namespace.identifier.utf8))
-        try BlahKeychain.write("binding-v2:" + slot, data: JSONEncoder().encode(Binding(namespace: namespace.identifier,
-            identityID: current.identity.id.description, deviceID: Data(current.identity.deviceKey.publicKey.id.bytes))))
+        try restoreKeychain.write("binding:" + slot, data: Data(namespace.identifier.utf8))
+        try restoreKeychain.write("binding-v2:" + slot, data: JSONEncoder().encode(Binding(namespace: namespace.identifier,
+            identityID: current.identity.id.description, deviceID: Data(current.identity.deviceKey.publicKey.id.bytes),
+            profile: Data(current.identity.profile.encoding))))
         return current.identity.profile.domains[0].name
     }
 
     /// Stored MTProto authorizations must pass this check before reconnecting. A legacy
     /// unbound slot is deliberately not adopted by whichever identity is selected next.
     public func validateRestoredBinding(slot: String, required: Bool = true) async throws {
-        guard let data = try BlahKeychain.read("binding-v2:" + slot) else {
-            if !required, try BlahKeychain.read("binding:" + slot) == nil { return }
+        guard let data = try restoreKeychain.read("binding-v2:" + slot) else {
+            if !required, try restoreKeychain.read("binding:" + slot) == nil { return }
             throw BlahIdentityError.wrongHome
         }
         guard let home = try self.home(slot: slot) else {
             throw BlahIdentityError.wrongHome
         }
-        let binding = try JSONDecoder().decode(Binding.self, from: data)
-        let profile = try AnyBlahProfile(encoding: Array(readRecord(binding.identityID).profile))
+        var binding = try JSONDecoder().decode(Binding.self, from: data)
+        let encoding: Data
+        if restoreKeychain.isAppExtension {
+            guard let snapshot = binding.profile else { throw BlahIdentityError.wrongHome }
+            encoding = snapshot
+        } else {
+            encoding = try readRecord(binding.identityID).profile
+        }
+        let profile = try AnyBlahProfile(encoding: Array(encoding))
         try requireAccount(profile)
         try await profile.verify(using: backend)
         let (dc, content) = try await home.verified()
@@ -225,8 +267,14 @@ public actor BlahIdentityStore {
         guard profile.id.description == binding.identityID, namespace.identifier == binding.namespace,
             profile.home?.isActive(at: backend.now) == true,
             profile.device(try BlahDiem.Digest(bytes: Array(binding.deviceID))) != nil,
-            try BlahKeychain.read("binding:" + slot) == Data(namespace.identifier.utf8) else {
+            try restoreKeychain.read("binding:" + slot) == Data(namespace.identifier.utf8) else {
             throw BlahIdentityError.wrongHome
+        }
+        if !restoreKeychain.isAppExtension, binding.profile != encoding,
+            try restoreKeychain.read("binding-v2:" + slot) == data,
+            try readRecord(binding.identityID).profile == encoding {
+            binding.profile = encoding
+            try restoreKeychain.write("binding-v2:" + slot, data: JSONEncoder().encode(binding))
         }
     }
 
@@ -451,6 +499,14 @@ public actor BlahIdentityStore {
         try BlahKeychain.write("identity:" + identity.id.description, data: JSONEncoder().encode(record))
         for (slot, current) in sessions where current.identity.id == identity.id {
             sessions[slot] = Session(identity: identity, record: record, expires: current.expires)
+        }
+        for key in try restoreKeychain.keys() where key.hasPrefix("binding-v2:") {
+            guard let data = try restoreKeychain.read(key) else { continue }
+            var binding = try JSONDecoder().decode(Binding.self, from: data)
+            if binding.identityID == identity.id.description {
+                binding.profile = record.profile
+                try restoreKeychain.write(key, data: JSONEncoder().encode(binding))
+            }
         }
         if record.sync, let secret = identity.identityKey?.rawRepresentation {
             let recovery = Recovery(version: 1, secret: Data(secret), profile: record.profile, hostingDomain: record.hostingDomain)

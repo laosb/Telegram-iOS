@@ -15,9 +15,17 @@ public struct BlahHome: Codable, Sendable {
         return (signed, signed.content)
     }
 
-    public static func discover(_ input: String, previous: BlahHome?) async throws -> BlahHome {
-        let domain = try BlahProfileHost.domain(input).name
-        let home = BlahHome(domain: domain, profile: try await BlahProfileHost.fetch(domain))
+    public static func discover(_ input: String, previous: BlahHome?, allowOffline: Bool = false) async throws -> BlahHome {
+        let domain = try BlahProfileHost.homeDomain(input).name
+        let data: Data
+        do {
+            data = try await BlahProfileHost.fetch(domain)
+        } catch BlahIdentityError.profileUnavailable {
+            guard allowOffline, let previous, previous.domain == domain else { throw BlahIdentityError.profileUnavailable }
+            _ = try await previous.verified()
+            return previous
+        }
+        let home = BlahHome(domain: domain, profile: data)
         let (next, dc) = try await home.verified()
         if let previous {
             let before = try DCProfile(encoding: Array(previous.profile))
@@ -33,6 +41,16 @@ public struct BlahHome: Codable, Sendable {
 
 @available(iOS 18.0, macOS 15.0, *)
 public enum BlahProfileHost {
+    static func homeDomain(_ input: String) throws -> DomainName {
+        var value = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value.hasPrefix("https://") {
+            value.removeFirst(8)
+            if value.hasSuffix("/") { value.removeLast() }
+        }
+        guard let domain = DomainName(normalizing: value) else { throw BlahIdentityError.invalidProfile }
+        return domain
+    }
+
     static func domain(_ input: String) throws -> DomainName {
         guard let domain = DomainName(normalizing: input.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw BlahIdentityError.invalidProfile
@@ -44,8 +62,20 @@ public enum BlahProfileHost {
         guard DomainName.isValid(domain) else {
             throw BlahIdentityError.invalidProfile
         }
-        let response = try await BlahHostingHTTPClient().send(HostingHTTPRequest(method: .get,
-            url: "https://\(domain)/.well-known/blah/profile.cbor", headers: ["Accept": "application/cbor"]))
+        let response: HostingHTTPResponse
+        do {
+            response = try await BlahHostingHTTPClient(serverErrorsAreUnavailable: true).send(HostingHTTPRequest(method: .get,
+                url: "https://\(domain)/.well-known/blah/profile.cbor", headers: ["Accept": "application/cbor"]))
+        } catch let error as URLError {
+            switch error.code {
+            case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed,
+                .notConnectedToInternet, .internationalRoamingOff, .callIsActive, .dataNotAllowed,
+                .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
+                .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid:
+                throw BlahIdentityError.profileUnavailable
+            default: throw error
+            }
+        }
         guard response.status == 200,
             response.header("content-type")?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased() == "application/cbor"
         else { throw BlahIdentityError.invalidProfile }
@@ -64,6 +94,8 @@ public enum BlahProfileHost {
 /// Credential-free transport shared by discovery and Diem's hosted-name client.
 @available(iOS 18.0, macOS 15.0, *)
 struct BlahHostingHTTPClient: HostingHTTPClient {
+    var serverErrorsAreUnavailable = false
+
     func send(_ outbound: HostingHTTPRequest) async throws -> HostingHTTPResponse {
         guard let url = URL(string: outbound.url), url.scheme == "https",
             let host = url.host, DomainName.isValid(host), url.user == nil, url.password == nil,
@@ -86,6 +118,9 @@ struct BlahHostingHTTPClient: HostingHTTPClient {
         for (name, value) in outbound.headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         let (bytes, response) = try await session.bytes(for: request)
+        if serverErrorsAreUnavailable, let response = response as? HTTPURLResponse, (500...599).contains(response.statusCode) {
+            throw BlahIdentityError.profileUnavailable
+        }
         guard let response = response as? HTTPURLResponse,
             response.expectedContentLength <= CBOR.maximumBytes,
             response.value(forHTTPHeaderField: "Content-Encoding").map({ $0.lowercased() == "identity" }) ?? true else {

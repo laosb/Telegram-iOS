@@ -1,4 +1,5 @@
 import Foundation
+import BlahIdentity
 import Postbox
 import SwiftSignalKit
 internal import TelegramApi
@@ -464,7 +465,14 @@ public func managedCleanupAccounts(networkArguments: NetworkInitializationArgume
                     for url in files {
                         if url.lastPathComponent.hasPrefix("account-") {
                             if !validPaths.contains(url.lastPathComponent) {
-                                try? FileManager.default.removeItem(at: url)
+                                Task { [url] in
+                                    do {
+                                        try await BlahIdentityStore.shared.remove(slot: url.lastPathComponent)
+                                        try FileManager.default.removeItem(at: url)
+                                    } catch {
+                                        Logger.shared.log("managedCleanupAccounts", "Blah slot cleanup deferred")
+                                    }
+                                }
                             }
                         }
                     }

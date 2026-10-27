@@ -6,8 +6,8 @@ import Security
 enum BlahKeychain {
     static let service = "ing.blah.identity.v1"
 
-    static func read(_ key: String, sync: Bool = false) throws -> Data? {
-        var query = attributes(key, sync: sync)
+    static func read(_ key: String, sync: Bool = false, accessGroup: String? = nil) throws -> Data? {
+        var query = attributes(key, sync: sync, accessGroup: accessGroup)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -17,28 +17,29 @@ enum BlahKeychain {
         return data
     }
 
-    static func write(_ key: String, data: Data, sync: Bool = false) throws {
-        let query = attributes(key, sync: sync)
+    static func write(_ key: String, data: Data, sync: Bool = false, accessGroup: String? = nil) throws {
+        let query = attributes(key, sync: sync, accessGroup: accessGroup)
         let update = [kSecValueData as String: data]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
             var item = query
             item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = sync ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            item[kSecAttrAccessible as String] = accessGroup != nil ? kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                : (sync ? kSecAttrAccessibleWhenUnlocked : kSecAttrAccessibleWhenUnlockedThisDeviceOnly)
             let added = SecItemAdd(item as CFDictionary, nil)
             guard added == errSecSuccess else { throw BlahIdentityError.keychain(added) }
         } else if status != errSecSuccess { throw BlahIdentityError.keychain(status) }
     }
 
-    static func remove(_ key: String, sync: Bool = false) throws {
-        let status = SecItemDelete(attributes(key, sync: sync) as CFDictionary)
+    static func remove(_ key: String, sync: Bool = false, accessGroup: String? = nil) throws {
+        let status = SecItemDelete(attributes(key, sync: sync, accessGroup: accessGroup) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw BlahIdentityError.keychain(status) }
     }
 
-    static func keys(sync: Bool = false) throws -> [String] {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service, kSecAttrSynchronizable as String: sync,
-            kSecReturnAttributes as String: true, kSecMatchLimit as String: kSecMatchLimitAll]
+    static func keys(sync: Bool = false, accessGroup: String? = nil) throws -> [String] {
+        var query = attributes(nil, sync: sync, accessGroup: accessGroup)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitAll
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
@@ -46,15 +47,47 @@ enum BlahKeychain {
         return (result as? [[String: Any]] ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
     }
 
-    private static func attributes(_ key: String, sync: Bool) -> [String: Any] {
-        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-            kSecAttrAccount as String: key, kSecAttrSynchronizable as String: sync]
+    private static func attributes(_ key: String?, sync: Bool, accessGroup: String?) -> [String: Any] {
+        var result: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: accessGroup == nil ? service : "ing.blah.identity.restore.v1",
+            kSecAttrSynchronizable as String: sync]
+        if let key { result[kSecAttrAccount as String] = key }
+        if let accessGroup { result[kSecAttrAccessGroup as String] = accessGroup }
+        return result
+    }
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+struct BlahRestoreKeychain {
+    let accessGroup: String
+    let isAppExtension: Bool
+
+    func read(_ key: String) throws -> Data? {
+        if let data = try BlahKeychain.read(key, accessGroup: accessGroup) { return data }
+        guard !isAppExtension, let data = try BlahKeychain.read(key) else { return nil }
+        try write(key, data: data)
+        return data
+    }
+
+    func write(_ key: String, data: Data) throws {
+        try BlahKeychain.write(key, data: data, accessGroup: accessGroup)
+    }
+
+    func remove(_ key: String) throws {
+        try BlahKeychain.remove(key)
+        try BlahKeychain.remove(key, accessGroup: accessGroup)
+    }
+
+    func keys() throws -> Set<String> {
+        var keys = Set(try BlahKeychain.keys(accessGroup: accessGroup))
+        if !isAppExtension { keys.formUnion(try BlahKeychain.keys()) }
+        return keys
     }
 }
 
 @available(iOS 18.0, macOS 15.0, *)
 public enum BlahIdentityError: Error, LocalizedError {
-    case keychain(OSStatus), unavailable, locked, invalidProfile, wrongHome, staleProfile, publicationRequired, duplicate
+    case keychain(OSStatus), unavailable, locked, invalidProfile, wrongHome, staleProfile, publicationRequired, duplicate, profileUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -66,6 +99,7 @@ public enum BlahIdentityError: Error, LocalizedError {
         case .staleProfile: return "The profile is older than the saved revision or conflicts with it."
         case .publicationRequired: return "Publish the latest profile at every listed domain, then sign in again."
         case .duplicate: return "This identity is already saved. Unlock its current copy."
+        case .profileUnavailable: return "The profile server could not be reached."
         }
     }
 }

@@ -17,12 +17,13 @@ extension Network {
     public var blahIdentitySlot: String { return URL(fileURLWithPath: self.basePath).lastPathComponent }
 
     func restoreBlahHome() {
+        // initializedNetwork carries supplementary in the MTProto environment.
+        let refresh = !self.context.apiEnvironment.disableUpdates
         Task {
             do {
-                if let home = try await BlahIdentityStore.shared.home(slot: self.blahIdentitySlot) {
-                    let refreshed = try await BlahIdentityStore.shared.connect(domain: home.domain, slot: self.blahIdentitySlot)
+                if let home = try await BlahIdentityStore.shared.restoreHome(slot: self.blahIdentitySlot, refresh: refresh) {
                     try await BlahIdentityStore.shared.validateRestoredBinding(slot: self.blahIdentitySlot, required: self.blahRequiresRestoredBinding)
-                    try await self.activateBlahHome(refreshed)
+                    try await self.activateBlahHome(home)
                 }
             } catch {
                 let _ = self.blahIdentityError.swap(error.localizedDescription)
@@ -44,7 +45,7 @@ extension Network {
         let (_, dc) = try await home.verified()
         let endpoints = dc.endpoints.filter { $0.transport == .tcp && !$0.tls }
         guard !endpoints.isEmpty, self.datacenterId == 1 else { throw BlahIdentityError.wrongHome }
-        let config = CustomDCConfig(defaultDcId: 1, dcs: [.init(id: 1,
+        let config = CustomDCConfig(dcs: [.init(id: 1,
             endpoints: endpoints.map { (ip: $0.host, port: Int($0.port)) }, rsaPublicKeyPem: dc.transportPublicKey)])
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             self.queue.async {
