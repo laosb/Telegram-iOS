@@ -18,5 +18,3 @@ Telegram/**/*.m filter=telegram-domain
 # which the source driver's quote/"//" anchoring skips, so they use the
 # unanchored driver.
 Telegram/**/*.strings filter=telegram-domain-strings
-# Files excluded from the filter (contain intentional domain-aware logic):
-# submodules/TelegramCore/Sources/TelegramLinkHost.swift !filter

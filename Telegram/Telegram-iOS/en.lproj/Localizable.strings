@@ -17245,7 +17245,6 @@ Error: %8$@";
 "Gift.Delete.Success" = "Gift Deleted";
 "blah.Login.Title" = "Welcome to Blah";
 "blah.Login.Subtitle" = "Connect to a DC, then choose or create your Blah identity.";
-"blah.Login.Placeholder" = "Identity domain";
 "blah.Login.Continue" = "Choose identity";
 
 "blah.Identity.Title" = "Identity Manager";

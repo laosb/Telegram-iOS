@@ -155,9 +155,7 @@ python3 build-system/Make/Make.py \
 
 The app, extensions, and embedded iOS frameworks share the deployment target in
 [Telegram/BUILD](Telegram/BUILD). Keep their generated `MinimumOSVersion` values aligned
-with the compiled binaries. If App Store upload reports error 90208 for `WidgetExtension`,
-rebuild the release IPA with the current build rules; older rules lowered the widget's
-plist to iOS 14 despite compiling it for iOS 18.
+with the compiled binaries.
 
 # FAQ
 

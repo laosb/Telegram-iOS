@@ -415,8 +415,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         }
         let (_, _, number) = self.controllerNode.codeAndNumber
         if !number.isEmpty {
-            let identifier = self.controllerNode.currentNumber
-            let logInNumber = identifier.contains("@") ? identifier : cleanPhoneNumber(identifier, removePlus: true)
+            let logInNumber = cleanPhoneNumber(self.controllerNode.currentNumber, removePlus: true)
             var existing: (String, AccountRecordId)?
             for (number, id, isTestingEnvironment) in self.otherAccountPhoneNumbers.1 {
                 if isTestingEnvironment == self.isTestingEnvironment && cleanPhoneNumber(number, removePlus: true) == logInNumber {
@@ -435,9 +434,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
                 actions.append(TextAlertAction(type: .defaultAction, title: self.presentationData.strings.Common_OK, action: {}))
                 self.present(textAlertController(sharedContext: self.sharedContext, title: nil, text: self.presentationData.strings.Login_PhoneNumberAlreadyAuthorized, actions: actions), in: .window(.root))
             } else {
-                if self.controllerNode is BlahAuthorizationEntryNode {
-                    self.loginWithNumber?(identifier, false)
-                } else if let validLayout = self.validLayout, validLayout.size.width > 320.0 {
+                if let validLayout = self.validLayout, validLayout.size.width > 320.0 {
                     let (code, formattedNumber) = self.controllerNode.formattedCodeAndNumber
 
                     let confirmationController = PhoneConfirmationController(theme: self.presentationData.theme, strings: self.presentationData.strings, code: code, number: formattedNumber, sourceController: self)

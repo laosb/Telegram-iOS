@@ -613,7 +613,6 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             // Blah installs addresses only after verifying this account's pinned home.
             context.keychain = keychain
             for id in 1...5 {
-                context.setSeedAddressSetForDatacenterWithId(id, seedAddressSet: MTDatacenterAddressSet(addressList: []))
                 context.updateAddressSetForDatacenter(withId: id, addressSet: MTDatacenterAddressSet(addressList: []), forceUpdateSchemes: true)
             }
             if !supplementary {
@@ -1355,7 +1354,7 @@ public final class Network: NSObject {
                     return nil
                 },
                 options: NetworkEngineRequestOptions(),
-                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
+                shouldContinueAfterError: networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
                 dependsOn: networkRequestDependency(tag: tag),
                 acknowledged: {
                     if info.contains(.acknowledgement) {

@@ -31,12 +31,10 @@ protocol AuthorizationPhoneEntryNode: AnyObject {
     func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition)
 }
 
-final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNode, UITextFieldDelegate {
+final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNode {
     private let logoNode = ASImageNode()
     private let titleNode = ImmediateTextNode()
     private let noticeNode = ImmediateTextNode()
-    private let inputNode = TextFieldNode()
-    private let separatorNode = ASDisplayNode()
     private let proceedNode: SolidRoundedButtonNode
     private let debugAction: () -> Void
 
@@ -45,28 +43,21 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
     var selectCountryCode: (() -> Void)?
     var checkPhone: (() -> Void)?
 
-    var currentNumber: String {
-        return (self.inputNode.textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    var currentNumber: String { return "" }
 
     var codeAndNumber: (Int32?, String?, String) {
-        get { return (999, nil, self.currentNumber) }
-        set {
-            self.inputNode.textField.text = newValue.2
-            self.textChanged()
-        }
+        get { return (999, nil, "") }
+        set {}
     }
 
     let syncContacts = false
-    var formattedCodeAndNumber: (String, String) { return ("", self.currentNumber) }
-    var codeNode: ASDisplayNode { return self.inputNode }
-    var numberNode: ASDisplayNode { return self.inputNode }
+    var formattedCodeAndNumber: (String, String) { return ("", "") }
+    var codeNode: ASDisplayNode { return self.proceedNode }
+    var numberNode: ASDisplayNode { return self.proceedNode }
     var buttonNode: ASDisplayNode { return self.proceedNode }
 
     var inProgress = false {
         didSet {
-            self.inputNode.textField.isEnabled = !self.inProgress
-            self.inputNode.alpha = self.inProgress ? 0.6 : 1.0
             if self.inProgress != oldValue {
                 if self.inProgress {
                     self.proceedNode.transitionToProgress()
@@ -99,36 +90,12 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         self.noticeNode.isAccessibilityElement = true
         self.noticeNode.accessibilityLabel = strings.blah_Login_Subtitle
 
-        let field = self.inputNode.textField
-        field.font = Font.regular(20.0)
-        field.textColor = theme.list.itemPrimaryTextColor
-        field.textAlignment = .natural
-        field.tintColor = theme.list.itemAccentColor
-        field.keyboardAppearance = theme.rootController.keyboardColor.keyboardAppearance
-        field.keyboardType = .emailAddress
-        field.autocapitalizationType = .none
-        field.autocorrectionType = .no
-        field.spellCheckingType = .no
-        field.textContentType = .username
-        field.returnKeyType = .continue
-        field.enablesReturnKeyAutomatically = true
-        field.placeholder = strings.blah_Login_Placeholder
-        field.accessibilityLabel = strings.blah_Login_Placeholder
-        field.accessibilityIdentifier = "Auth.BlahEntry.IdentifierField"
-        field.disableAutomaticKeyboardHandling = [.forward, .backward]
-        field.delegate = self
-        field.addTarget(self, action: #selector(self.textChanged), for: .editingChanged)
-
-        self.inputNode.isHidden = true
-        self.separatorNode.isHidden = true
-        self.separatorNode.isLayerBacked = true
-        self.separatorNode.backgroundColor = theme.list.itemPlainSeparatorColor
         self.proceedNode.progressType = .embedded
         self.proceedNode.isEnabled = true
         self.proceedNode.accessibilityIdentifier = "Auth.PhoneEntry.ContinueButton"
         self.proceedNode.pressed = { [weak self] in self?.submit() }
 
-        for node in [self.logoNode, self.titleNode, self.noticeNode, self.inputNode, self.separatorNode, self.proceedNode] as [ASDisplayNode] {
+        for node in [self.logoNode, self.titleNode, self.noticeNode, self.proceedNode] as [ASDisplayNode] {
             self.addSubnode(node)
         }
     }
@@ -143,7 +110,7 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
 
     @objc private func openDebug() { self.debugAction() }
 
-    @objc private func textChanged() {
+    private func textChanged() {
         self.proceedNode.isEnabled = !self.inProgress
     }
 
@@ -152,21 +119,14 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         self.checkPhone?()
     }
 
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        self.submit()
-        return false
-    }
-
     func activateInput() {}
-    func animateError() { self.inputNode.layer.addShakeAnimation() }
+    func animateError() {}
 
     // Country updates and phone/passkey copy must not replace the Blah form.
     func updateCountryCode() {}
     func updateDisplayPasskeyLoginOption() {}
     func willAnimateIn(buttonFrame: CGRect, buttonTitle: String, animationSnapshot: UIView, textSnapshot: UIView) {}
-    func animateIn(buttonFrame: CGRect, buttonTitle: String, animationSnapshot: UIView, textSnapshot: UIView) {
-        self.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.25)
-    }
+    func animateIn(buttonFrame: CGRect, buttonTitle: String, animationSnapshot: UIView, textSnapshot: UIView) {}
 
     func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition) {
         let insets = layout.insets(options: [])
@@ -181,7 +141,6 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         transition.updateFrame(node: self.proceedNode, frame: CGRect(x: floorToScreenPixels((layout.size.width - width) / 2.0), y: buttonY, width: width, height: buttonHeight))
 
         var items: [AuthorizationLayoutItem] = []
-        // Make room for the field and Continue on small screens with a keyboard.
         let showLogo = buttonY - top > titleSize.height + noticeSize.height + 190.0
         self.logoNode.isHidden = !showLogo
         if showLogo {
