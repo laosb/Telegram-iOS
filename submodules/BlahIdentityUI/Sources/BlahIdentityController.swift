@@ -276,7 +276,7 @@ private final class IdentityCoordinator: NSObject, UIDocumentPickerDelegate {
                 }
             }
             row(strings.blah_Identity_CopyDevice, section: 5) { [weak self] _ in
-                UIPasteboard.general.string = Data(identity.device.encoding).base64EncodedString()
+                UIPasteboard.general.string = Data(identity.device.key.encoding).base64EncodedString()
                 self?.message = self?.strings.blah_Identity_Copied
                 self?.publishRows()
             }
