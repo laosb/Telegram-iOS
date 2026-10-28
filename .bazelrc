@@ -3,6 +3,7 @@ build --action_env=ZERO_AR_DATE=1
 build --enable_platform_specific_config
 
 # The fork's iOS 18 target in Telegram/BUILD exposes deprecations upstream misses at 15.0; keep them warnings under upstream -Werror and Swift's -warnings-as-errors.
+# swiftc rejects -suppress-warnings alongside -Wwarning, so Swift targets must not suppress warnings.
 build --copt=-Wno-error=deprecated-declarations
 build --@build_bazel_rules_swift//swift:copt=-Wwarning
 build --@build_bazel_rules_swift//swift:copt=DeprecatedDeclaration

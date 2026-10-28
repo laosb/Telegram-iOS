@@ -256,7 +256,6 @@ swift_library(
     copts = [
         "-swift-version",
         "6",
-        "-suppress-warnings",
     ],
     deps = [":wallet_engine_ffi"],
     visibility = ["//visibility:public"],

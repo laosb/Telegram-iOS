@@ -6,9 +6,6 @@ swift_library(
     srcs = glob([
 		"Sources/**/*.swift",
     ]),
-    copts = [
-        "-suppress-warnings",
-    ],
     deps = [
     ],
     visibility = [
