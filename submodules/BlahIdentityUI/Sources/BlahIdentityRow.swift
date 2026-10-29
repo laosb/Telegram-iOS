@@ -3,7 +3,16 @@ import ItemListUI
 import TelegramPresentationData
 
 struct IdentityRow: ItemListNodeEntry {
-    let stableId: Int32
+    enum Kind: Hashable {
+        case header, text, disclosure, `switch`, action
+    }
+
+    struct StableId: Hashable {
+        let index: Int32
+        let kind: Kind
+    }
+
+    let index: Int32
     let section: ItemListSectionId
     let title: String
     var detail: String? = nil
@@ -12,7 +21,18 @@ struct IdentityRow: ItemListNodeEntry {
     var isHeader = false
     var isDestructive = false
     var isEnabled = true
-    static func <(lhs: IdentityRow, rhs: IdentityRow) -> Bool { lhs.stableId < rhs.stableId }
+    private var kind: Kind {
+        if isHeader { return .header }
+        else if isText { return .text }
+        else if detail != nil { return .disclosure }
+        else if value != nil { return .switch }
+        else { return .action }
+    }
+
+    // ItemList updates same-id nodes in place; updateNode drops nodes of another item kind.
+    var stableId: StableId { StableId(index: index, kind: kind) }
+
+    static func <(lhs: IdentityRow, rhs: IdentityRow) -> Bool { lhs.index < rhs.index }
 
     func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
         let actions = arguments as! IdentityActions
@@ -23,15 +43,15 @@ struct IdentityRow: ItemListNodeEntry {
         } else if let detail {
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass,
                 title: title, enabled: isEnabled, label: detail, labelStyle: .multilineDetailText,
-                sectionId: section, style: .blocks, action: { actions.invoke(self.stableId, nil) })
+                sectionId: section, style: .blocks, action: { actions.invoke(self.index, nil) })
         } else if let value {
             return ItemListSwitchItem(presentationData: presentationData, systemStyle: .glass,
                 title: title, value: value, enabled: isEnabled, sectionId: section, style: .blocks,
-                updated: { actions.invoke(self.stableId, $0) })
+                updated: { actions.invoke(self.index, $0) })
         } else {
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass,
                 title: title, kind: !isEnabled ? .disabled : isDestructive ? .destructive : .generic,
-                alignment: .natural, sectionId: section, style: .blocks, action: { actions.invoke(self.stableId, nil) })
+                alignment: .natural, sectionId: section, style: .blocks, action: { actions.invoke(self.index, nil) })
         }
     }
 }

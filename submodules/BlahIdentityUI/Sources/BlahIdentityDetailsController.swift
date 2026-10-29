@@ -85,7 +85,7 @@ private final class IdentityDetailsCoordinator: NSObject {
         refresh()
     }
     func invoke(_ id: Int32, _ value: Bool?) {
-        guard !isBusy, contentRows.first(where: { $0.stableId == id })?.isEnabled == true else { return }
+        guard !isBusy, contentRows.first(where: { $0.index == id })?.isEnabled == true else { return }
         actions[id]?(value)
     }
 
@@ -103,7 +103,7 @@ private final class IdentityDetailsCoordinator: NSObject {
             header: Bool = false, destructive: Bool = false, enabled: Bool = true, action: @escaping (Bool?) -> Void = { _ in }) {
             // Reserve a stable row for progress and errors.
             let id = Int32(entries.count + 1)
-            entries.append(IdentityRow(stableId: id, section: section, title: title, detail: detail, value: value,
+            entries.append(IdentityRow(index: id, section: section, title: title, detail: detail, value: value,
                 isText: text, isHeader: header, isDestructive: destructive, isEnabled: enabled))
             actions[id] = action
         }
@@ -225,7 +225,7 @@ private final class IdentityDetailsCoordinator: NSObject {
         }
         let status = isBusy ? strings.blah_Identity_Working : message
         if let status {
-            entries.insert(IdentityRow(stableId: 0, section: 0, title: status, isText: true), at: 0)
+            entries.insert(IdentityRow(index: 0, section: 0, title: status, isText: true), at: 0)
         }
         rows.set(entries)
     }

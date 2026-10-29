@@ -138,7 +138,7 @@ private final class IdentityListCoordinator {
         actions = [:]
         func row(_ title: String, section: Int32 = 0, detail: String? = nil, text: Bool = false, action: @escaping () -> Void = {}) {
             let id = Int32(entries.count)
-            entries.append(IdentityRow(stableId: id, section: section, title: title, detail: detail, isText: text,
+            entries.append(IdentityRow(index: id, section: section, title: title, detail: detail, isText: text,
                 isEnabled: !isBusy && !isSigningIn))
             actions[id] = action
         }
