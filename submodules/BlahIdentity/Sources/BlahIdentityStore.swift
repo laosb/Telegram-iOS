@@ -8,6 +8,7 @@ import DiemSwiftCrypto
 public struct BlahIdentitySummary: Sendable {
     public let id: String
     public let domain: String
+    public let homeDomain: String?
 }
 
 @available(iOS 18.0, macOS 15.0, *)
@@ -23,6 +24,7 @@ public struct BlahIdentityView: Sendable {
     public let autoRenew: Bool
     public let hostingDomain: String?
     public let publicationPending: Bool
+    public let canManageIdentity: Bool
 }
 
 @available(iOS 18.0, macOS 15.0, *)
@@ -41,12 +43,29 @@ public actor BlahIdentityStore {
     private var renewalTasks: [String: Task<Void, Never>] = [:]
     private var isBusy = false
     private var shouldLock = false
+    private var linkGeneration: UInt64 = 0
+    private var deviceLinks: [UUID: PendingDeviceLink] = [:]
+    private var installedDeviceLinks: [UUID: (slot: String, device: BlahDiem.Digest)] = [:]
+
+    private struct PendingDeviceLink {
+        let generation: UInt64
+        let slot: String
+        let home: BlahHome
+        let expectedDomain: DomainName?
+        let request: DeviceLinkRequest
+        let code: DeviceLinkCode
+        let device: DevicePrivateKey
+        let deviceReference: Data
+        let recipient: EncryptionPrivateKey
+        let encryptionReference: Data
+        let expires: UInt64
+    }
     private static let day: UInt64 = 86400
     private static let timeout: UInt64 = 900
 
     private struct Record: Codable {
         var profile: Data
-        let rootBox: Data
+        let rootBox: Data?
         let encryptionReference: Data
         let deviceReference: Data
         var biometrics: Bool
@@ -54,6 +73,8 @@ public actor BlahIdentityStore {
         var profileDays: UInt64 = 180
         var deviceDays: UInt64 = 180
         var autoRenew: Bool = true
+        var homeDomain: String?
+        var home: BlahHome?
         var hostingDomain: String?
         var publishedProfile: Data?
         var checkedProfile: Data?
@@ -62,6 +83,8 @@ public actor BlahIdentityStore {
         let version: Int
         let secret: Data
         let profile: Data
+        var homeDomain: String?
+        var home: BlahHome?
         var hostingDomain: String?
     }
     private struct Binding: Codable {
@@ -81,10 +104,17 @@ public actor BlahIdentityStore {
     }
 
     public func list() throws -> [BlahIdentitySummary] {
-        return try BlahKeychain.keys().filter { $0.hasPrefix("identity:") }.map { key in
-            let record = try readRecord(String(key.dropFirst(9)))
-            let profile = try AnyBlahProfile(encoding: Array(record.profile))
-            return BlahIdentitySummary(id: profile.id.description, domain: profile.domains.first?.name ?? profile.id.description)
+        return try BlahKeychain.keys().filter { $0.hasPrefix("identity:") || $0.hasPrefix("device-identity:") }.compactMap { key -> BlahIdentitySummary? in
+            guard let data = try BlahKeychain.read(key) else { return nil }
+            do {
+                let record = try decodeRecord(data)
+                let profile = try AnyBlahProfile(encoding: Array(record.profile))
+                return BlahIdentitySummary(id: profile.id.description, domain: profile.domains.first?.name ?? profile.id.description, homeDomain: record.homeDomain)
+            } catch {
+                // Do not log custody bytes, identifiers or decoder payloads.
+                NSLog("BlahIdentity: skipping unreadable identity record")
+                return nil
+            }
         }.sorted { $0.domain < $1.domain }
     }
 
@@ -92,7 +122,7 @@ public actor BlahIdentityStore {
         return try BlahKeychain.keys(sync: true).filter { $0.hasPrefix("recovery:") }.map { key in
             let recovery = try JSONDecoder().decode(Recovery.self, from: BlahKeychain.read(key, sync: true)!)
             let profile = try AnyBlahProfile(encoding: Array(recovery.profile))
-            return BlahIdentitySummary(id: profile.id.description, domain: profile.domains.first?.name ?? profile.id.description)
+            return BlahIdentitySummary(id: profile.id.description, domain: profile.domains.first?.name ?? profile.id.description, homeDomain: recovery.homeDomain)
         }
     }
 
@@ -104,6 +134,7 @@ public actor BlahIdentityStore {
     public func connect(domain: String, slot: String) async throws -> BlahHome {
         try begin(); defer { finish() }
         let home = try await BlahHome.discover(domain, previous: self.home(slot: slot))
+        try checkActive()
         try restoreKeychain.write("home:" + slot, data: JSONEncoder().encode(home))
         return home
     }
@@ -116,6 +147,7 @@ public actor BlahIdentityStore {
         }
         try begin(); defer { finish() }
         let home = try await BlahHome.discover(saved.domain, previous: saved, allowOffline: true)
+        try checkActive()
         try restoreKeychain.write("home:" + slot, data: JSONEncoder().encode(home))
         return home
     }
@@ -161,6 +193,8 @@ public actor BlahIdentityStore {
         let identity = try await BasicIdentity<AnyBlahProfile>(.user(user), identityKey: root, deviceKey: device.key,
             profileLifetime: 180 * Self.day, deviceLifetime: 180 * Self.day, using: backend)
         var record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        record.homeDomain = home.domain
+        record.home = home
         record.hostingDomain = hostingDomain
         try await save(identity: identity, record: record)
         setSession(slot, identity: identity, record: record)
@@ -173,7 +207,12 @@ public actor BlahIdentityStore {
         try begin(); defer { finish() }
         var record = try readRecord(id)
         let recipient = try EncryptionPrivateKey(secureEnclaveReference: record.encryptionReference)
-        let root = try await SealedIdentityKey(encoding: Array(record.rootBox)).open(with: recipient, using: backend)
+        let root: IdentityPrivateKey?
+        if let box = record.rootBox {
+            root = try await SealedIdentityKey(encoding: Array(box)).open(with: recipient, using: backend)
+        } else {
+            root = nil
+        }
         let device = try DevicePrivateKey(PrivateKey(secureEnclaveReference: record.deviceReference, for: .device))
         var identity = try await BasicIdentity<AnyBlahProfile>(profile: AnyBlahProfile(encoding: Array(record.profile)), deviceKey: device, identityKey: root,
             profileLifetime: record.profileDays * Self.day, deviceLifetime: record.deviceDays * Self.day, using: backend)
@@ -198,7 +237,7 @@ public actor BlahIdentityStore {
         // A failed PUT retains custody and the exact signed revision for an explicit retry.
         // Never create a new revision until the preceding hosted publication is acknowledged.
         do {
-            let shouldRenew = record.autoRenew && isRenewalDue(current.identity.profile)
+            let shouldRenew = current.identity.identityKey != nil && record.autoRenew && isRenewalDue(current.identity.profile)
             try await publishHosted(&current, allowExpired: shouldRenew)
             if shouldRenew {
                 try await renew(&current.identity)
@@ -210,6 +249,9 @@ public actor BlahIdentityStore {
     }
 
     public func lock() {
+        linkGeneration &+= 1
+        deviceLinks.removeAll()
+        installedDeviceLinks.removeAll()
         for task in renewalTasks.values { task.cancel() }
         renewalTasks.removeAll()
         if isBusy { shouldLock = true; return }
@@ -233,6 +275,7 @@ public actor BlahIdentityStore {
         if let saved = try restoreKeychain.read("binding:" + slot), saved != Data(namespace.identifier.utf8) {
             throw BlahIdentityError.wrongHome
         }
+        try checkActive()
         try restoreKeychain.write("binding:" + slot, data: Data(namespace.identifier.utf8))
         try restoreKeychain.write("binding-v2:" + slot, data: JSONEncoder().encode(Binding(namespace: namespace.identifier,
             identityID: current.identity.id.description, deviceID: Data(current.identity.deviceKey.publicKey.id.bytes),
@@ -278,18 +321,22 @@ public actor BlahIdentityStore {
         }
     }
 
-    public func prove(slot: String, challenge: Data, expires: Int32, query: Data, keyID: Int64, sessionID: Int64) async throws -> Data {
+    public func prove(slot: String, challenge: Data, expires: Int32, query: Data, keyID: Int64, sessionID: Int64,
+        expectedProfile: Data? = nil) async throws -> Data {
         try begin(); defer { finish() }
         let current = try session(slot)
         let parsed = try InvocationChallenge(encoding: Array(challenge))
         let profile = current.identity.profile
+        if let expectedProfile, expectedProfile != Data(profile.encoding) { throw BlahIdentityError.staleProfile }
         try await profile.verify(using: backend)
         guard let home = profile.home, home.isActive(at: backend.now), parsed.dc == home.dc,
             parsed.domain == profile.domains[0], parsed.transportKeyID == keyID,
             parsed.sessionID == UInt64(bitPattern: sessionID), expires > 0, parsed.expiresAt == UInt64(expires) else {
             throw BlahIdentityError.invalidProfile
         }
-        return Data(try await current.identity.prove(InvocationStatement(challenge: parsed, payload: Array(query))).encoding)
+        let proof = try await current.identity.prove(InvocationStatement(challenge: parsed, payload: Array(query)))
+        try checkActive()
+        return Data(proof.encoding)
     }
 
     public func number(slot: String, account: Int64) async throws {
@@ -323,6 +370,7 @@ public actor BlahIdentityStore {
     public func change(slot: String, change: Change) async throws -> BlahIdentityView {
         try begin(); defer { finish() }
         var current = try session(slot)
+        guard current.identity.identityKey != nil else { throw BlahIdentityError.managementRequired }
         let publishes: Bool
         switch change {
         case .renew:
@@ -363,6 +411,7 @@ public actor BlahIdentityStore {
                 encryptionReference: record.encryptionReference, deviceReference: record.deviceReference,
                 biometrics: enabled, sync: record.sync, profileDays: current.record.profileDays,
                 deviceDays: current.record.deviceDays, autoRenew: current.record.autoRenew,
+                homeDomain: current.record.homeDomain, home: current.record.home,
                 hostingDomain: current.record.hostingDomain, publishedProfile: current.record.publishedProfile,
                 checkedProfile: current.record.checkedProfile)
         }
@@ -392,7 +441,7 @@ public actor BlahIdentityStore {
 
     public func restoreCloud(id: String, slot: String, biometrics: Bool) async throws -> BlahIdentityView {
         guard let data = try BlahKeychain.read("recovery:" + id, sync: true) else { throw BlahIdentityError.invalidProfile }
-        return try await restoreRecovery(data, slot: slot, biometrics: biometrics, sync: true)
+        return try await restoreRecovery(data, slot: slot, home: self.home(slot: slot), biometrics: biometrics, sync: true)
     }
 
     // File recovery carries the exportable root; hardware device keys stay on this phone.
@@ -411,9 +460,26 @@ public actor BlahIdentityStore {
     }
 
     public func importRecovery(_ data: Data, password: String, slot: String, biometrics: Bool) async throws -> BlahIdentityView {
+        let recovery = try await recoveryFile(data, password: password)
+        return try await restoreRecovery(JSONEncoder().encode(recovery), slot: slot, home: self.home(slot: slot), biometrics: biometrics, sync: false)
+    }
+
+    public func importRecovery(_ data: Data, password: String, home: BlahHome, biometrics: Bool) async throws -> String {
+        let recovery = try await recoveryFile(data, password: password)
+        return try await restoreRecovery(JSONEncoder().encode(recovery), home: home, biometrics: biometrics, sync: false).id
+    }
+
+    public func restoreCloud(id: String, home: BlahHome?, biometrics: Bool) async throws -> String {
+        guard let data = try BlahKeychain.read("recovery:" + id, sync: true) else { throw BlahIdentityError.invalidProfile }
+        let recovery = try JSONDecoder().decode(Recovery.self, from: data)
+        guard try AnyBlahProfile(encoding: Array(recovery.profile)).id.description == id else { throw BlahIdentityError.invalidProfile }
+        return try await restoreRecovery(data, home: home, biometrics: biometrics, sync: true).id
+    }
+
+    private func recoveryFile(_ data: Data, password: String) async throws -> Recovery {
         let contents = try await BlahRecoveryFile.open(data, password: password)
         guard let root = contents.keys.first(where: { $0.publicKey.purpose == .identity }) else {
-            throw BlahIdentityError.invalidProfile
+            throw BlahIdentityError.managementRequired
         }
         let metadata = try contents.metadata.recordValue(requiredKeys: 0..<0)
         let hosting = try metadata[7].map { try $0.recordValue(requiredKeys: 0..<3)[0]!.textValue() }
@@ -421,39 +487,65 @@ public actor BlahIdentityStore {
             let host = ProfileHostingClient(domain: try DomainName(hosting), http: BlahHostingHTTPClient())
             guard !host.labels(in: contents.profile).isEmpty else { throw BlahIdentityError.invalidProfile }
         }
-        let recovery = Recovery(version: 1, secret: Data(root.secret), profile: Data(contents.profile.encoding), hostingDomain: hosting)
-        return try await restoreRecovery(JSONEncoder().encode(recovery), slot: slot, biometrics: biometrics, sync: false)
+        return Recovery(version: 1, secret: Data(root.secret), profile: Data(contents.profile.encoding), hostingDomain: hosting)
     }
 
-    private func restoreRecovery(_ data: Data, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
+    private func restoreRecovery(_ data: Data, slot: String? = nil, home: BlahHome? = nil, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
         try begin(); defer { finish() }
         guard data.count <= 600000 else { throw BlahIdentityError.invalidProfile }
         let recovery = try JSONDecoder().decode(Recovery.self, from: data)
         guard recovery.version == 1 else { throw BlahIdentityError.invalidProfile }
         let saved = try AnyBlahProfile(encoding: Array(recovery.profile))
         try requireAccount(saved)
-        guard try BlahKeychain.read("identity:" + saved.id.description) == nil else { throw BlahIdentityError.duplicate }
+        try await saved.verify(using: backend, at: saved.validity.notBefore)
+        guard try recordData(saved.id.description) == nil else { throw BlahIdentityError.duplicate }
         let root = try await IdentityPrivateKey(backend.makePrivateKey(saved.identityKey.key.algorithm, for: .identity, restoring: Array(recovery.secret)))
         let domain = saved.domains[0].name
         let profile = try AnyBlahProfile(encoding: Array(try await BlahProfileHost.fetch(domain)))
         try requireAccount(profile)
         try await profile.verify(using: backend, at: profile.validity.notBefore)
         try BlahProfileHost.requireMonotonic(profile, after: saved)
+        let selectedHome: BlahHome?
+        if let home { selectedHome = home }
+        else if let domain = recovery.homeDomain {
+            selectedHome = try await BlahHome.discover(domain, previous: recovery.home)
+        } else { selectedHome = recovery.home }
+        if let selectedHome {
+            let (dc, _) = try await selectedHome.verified()
+            guard profile.home?.dc == dc.id else { throw BlahIdentityError.wrongHome }
+        }
         let device = try makeDevice()
         var identity = try await BasicIdentity<AnyBlahProfile>.enrolling(device.key, in: profile, identityKey: root,
             profileLifetime: 180 * Self.day, deviceLifetime: 180 * Self.day, using: backend)
         try await renew(&identity)
         var record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        record.homeDomain = recovery.homeDomain
+        record.home = recovery.home
+        if let selectedHome { try rememberHome(selectedHome, profile: identity.profile, record: &record) }
         record.hostingDomain = recovery.hostingDomain
         try await save(identity: identity, record: record)
-        setSession(slot, identity: identity, record: record)
-        var current = try session(slot)
+        if let slot { setSession(slot, identity: identity, record: record) }
+        var current = Session(identity: identity, record: record, expires: backend.now + Self.timeout)
         try await publishHosted(&current)
         return try view(current.identity, current.record)
     }
 
     private func readRecord(_ id: String) throws -> Record {
-        guard let data = try BlahKeychain.read("identity:" + id) else { throw BlahIdentityError.locked }
+        guard let data = try recordData(id) else { throw BlahIdentityError.locked }
+        return try decodeRecord(data)
+    }
+
+    private func recordData(_ id: String) throws -> Data? {
+        return try BlahKeychain.read("identity:" + id) ?? BlahKeychain.read("device-identity:" + id)
+    }
+
+    private func writeRecord(_ record: Record, id: String) throws {
+        // Older apps enumerate identity: and require a sealed root in every record.
+        let prefix = record.rootBox == nil ? "device-identity:" : "identity:"
+        try BlahKeychain.write(prefix + id, data: JSONEncoder().encode(record))
+    }
+
+    private func decodeRecord(_ data: Data) throws -> Record {
         let record = try JSONDecoder().decode(Record.self, from: data)
         guard record.profileDays > 0, record.deviceDays >= record.profileDays, record.deviceDays < 36500 else {
             throw BlahIdentityError.invalidProfile
@@ -494,9 +586,10 @@ public actor BlahIdentityStore {
     }
 
     private func save(identity: BasicIdentity<AnyBlahProfile>, record: Record) async throws {
+        try checkActive()
         var record = record
         record.profile = Data(identity.profile.encoding)
-        try BlahKeychain.write("identity:" + identity.id.description, data: JSONEncoder().encode(record))
+        try writeRecord(record, id: identity.id.description)
         for (slot, current) in sessions where current.identity.id == identity.id {
             sessions[slot] = Session(identity: identity, record: record, expires: current.expires)
         }
@@ -509,7 +602,8 @@ public actor BlahIdentityStore {
             }
         }
         if record.sync, let secret = identity.identityKey?.rawRepresentation {
-            let recovery = Recovery(version: 1, secret: Data(secret), profile: record.profile, hostingDomain: record.hostingDomain)
+            let recovery = Recovery(version: 1, secret: Data(secret), profile: record.profile,
+                homeDomain: record.homeDomain, home: record.home, hostingDomain: record.hostingDomain)
             try BlahKeychain.write("recovery:" + identity.id.description, data: JSONEncoder().encode(recovery), sync: true)
         }
     }
@@ -527,7 +621,7 @@ public actor BlahIdentityStore {
             current.record.publishedProfile != Data(current.identity.profile.encoding) else { return }
         if allowExpired, ([current.identity.profile.validity] + current.identity.profile.devices.map(\.validity))
             .contains(where: { $0.expiresAt <= backend.now }) { return }
-        let host = ProfileHostingClient(domain: try DomainName(domain), http: BlahHostingHTTPClient())
+        let host = ProfileHostingClient(domain: try DomainName(domain), http: BlahHostingHTTPClient(detectUnsupportedHosting: true))
         try await host.publish(current.identity.profile, solver: BlahHostingProofOfWork())
         current.record.publishedProfile = Data(current.identity.profile.encoding)
         try await persist(&current)
@@ -561,7 +655,7 @@ public actor BlahIdentityStore {
         guard !isBusy, var current = try? session(slot, touch: false) else { return }
         isBusy = true; defer { finish() }
         do {
-            let shouldRenew = current.record.autoRenew && isRenewalDue(current.identity.profile)
+            let shouldRenew = current.identity.identityKey != nil && current.record.autoRenew && isRenewalDue(current.identity.profile)
             try await publishHosted(&current, allowExpired: shouldRenew)
             if shouldRenew {
                 try await renew(&current.identity)
@@ -597,15 +691,379 @@ public actor BlahIdentityStore {
         return BlahIdentityView(id: identity.id.description, profile: identity.profile, user: HostedContent(home: identity.profile.home, domains: identity.profile.domains),
             device: identity.deviceKey.publicKey, biometrics: record.biometrics, sync: record.sync,
             profileDays: record.profileDays, deviceDays: record.deviceDays, autoRenew: record.autoRenew,
-            hostingDomain: record.hostingDomain, publicationPending: record.checkedProfile != Data(identity.profile.encoding))
+            hostingDomain: record.hostingDomain, publicationPending: record.checkedProfile != Data(identity.profile.encoding),
+            canManageIdentity: identity.identityKey != nil)
+    }
+
+    private func checkActive() throws {
+        try Task.checkCancellation()
+        guard !shouldLock else { throw BlahIdentityError.locked }
     }
 
     private func begin() throws {
+        try checkActive()
         guard !isBusy else { throw BlahIdentityError.locked }
         isBusy = true
     }
     private func finish() {
         isBusy = false
         if shouldLock { shouldLock = false; lock() }
+    }
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+public enum BlahDomainProbe: Sendable {
+    case available(domain: String)
+    case existing(domain: String, id: String, sameHome: Bool)
+    case saved(id: String)
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+public enum BlahPublication: Sendable {
+    case published
+    case manual(profile: Data, url: String)
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+public struct BlahMintResult: Sendable {
+    public let id: String
+    public let publication: BlahPublication
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+extension BlahIdentityStore {
+    public func discoverHome(_ input: String) async throws -> BlahHome {
+        return try await BlahHome.discover(input, previous: nil)
+    }
+
+    public func boundIdentityID(slot: String) throws -> String? {
+        guard let data = try restoreKeychain.read("binding-v2:" + slot) else { return nil }
+        return try JSONDecoder().decode(Binding.self, from: data).identityID
+    }
+
+    /// A routing check only; connect/bind still verify the signed DC and namespace.
+    public func canUseSlot(slot: String, homeDomain: String, identityID: String?) throws -> Bool {
+        let domain = try BlahProfileHost.homeDomain(homeDomain).name
+        let home = try home(slot: slot)
+        if let home, home.domain != domain { return false }
+        if let bound = try boundIdentityID(slot: slot) { return home != nil && bound == identityID }
+        // An older binding without its identity metadata cannot safely be reused.
+        return try restoreKeychain.read("binding:" + slot) == nil
+    }
+
+    public func savedIdentityID(domain: String) throws -> String? {
+        let name = try BlahProfileHost.domain(domain)
+        for entry in try list() {
+            let profile = try AnyBlahProfile(encoding: Array(readRecord(entry.id).profile))
+            if profile.domains.contains(name) { return entry.id }
+        }
+        return nil
+    }
+
+    public func setHomeDomain(id: String, home: BlahHome) throws {
+        try begin(); defer { finish() }
+        var record = try readRecord(id)
+        let profile = try AnyBlahProfile(encoding: Array(record.profile))
+        try rememberHome(home, profile: profile, record: &record)
+        try writeRecord(record, id: id)
+        for (slot, var current) in sessions where current.identity.id.description == id {
+            current.record = record
+            sessions[slot] = current
+        }
+        if record.sync, let data = try BlahKeychain.read("recovery:" + id, sync: true) {
+            var recovery = try JSONDecoder().decode(Recovery.self, from: data)
+            recovery.homeDomain = home.domain
+            recovery.home = home
+            try BlahKeychain.write("recovery:" + id, data: JSONEncoder().encode(recovery), sync: true)
+        }
+    }
+
+    private func rememberHome(_ home: BlahHome, profile: AnyBlahProfile, record: inout Record) throws {
+        let dc = try DCProfile(encoding: Array(home.profile))
+        guard dc.serves(home.domain), dc.namespaceGeneration != nil, profile.home?.dc == dc.id else {
+            throw BlahIdentityError.wrongHome
+        }
+        if let previous = record.home {
+            let before = try DCProfile(encoding: Array(previous.profile))
+            guard previous.domain == home.domain, before.namespaceGeneration == dc.namespaceGeneration else {
+                throw BlahIdentityError.wrongHome
+            }
+            try BlahProfileHost.requireMonotonic(dc, after: before)
+        }
+        record.homeDomain = home.domain
+        record.home = home
+    }
+
+    public func probe(domain: String, home: BlahHome) async throws -> BlahDomainProbe {
+        let name = try BlahProfileHost.domain(domain)
+        let (dc, _) = try await home.verified()
+        if let id = try savedIdentityID(domain: name.name) { return .saved(id: id) }
+        let response: HostingHTTPResponse
+        do {
+            response = try await BlahHostingHTTPClient(serverErrorsAreUnavailable: true).send(HostingHTTPRequest(method: .get,
+                url: "https://\(name.name)/.well-known/blah/profile.cbor", headers: ["Accept": "application/cbor"]))
+        } catch let error as URLError where error.code == .cannotFindHost {
+            return .available(domain: name.name)
+        }
+        if response.status == 404 { return .available(domain: name.name) }
+        guard response.status == 200 else { throw BlahIdentityError.profileUnavailable }
+        guard (try? CBOR(decoding: response.body)) != nil else { return .available(domain: name.name) }
+        // A CBOR profile-shaped object with broken authority must never invite replacement.
+        let profile: AnyBlahProfile
+        do {
+            profile = try AnyBlahProfile(encoding: response.body)
+            try requireAccount(profile)
+            try await profile.verify(using: backend)
+            guard profile.domains.contains(name), profile.home?.isActive(at: backend.now) == true else {
+                throw BlahIdentityError.invalidProfile
+            }
+        } catch { throw BlahIdentityError.profileVerificationFailed }
+        if try recordData(profile.id.description) != nil {
+            return .saved(id: profile.id.description)
+        }
+        return .existing(domain: name.name, id: profile.id.description, sameHome: profile.home?.dc == dc.id)
+    }
+
+    public func mint(domain: String, home: BlahHome, biometrics: Bool, sync: Bool) async throws -> BlahMintResult {
+        try begin(); defer { finish() }
+        let name = try BlahProfileHost.domain(domain)
+        guard case .available = try await probe(domain: name.name, home: home) else { throw BlahIdentityError.duplicate }
+        let (dc, _) = try await home.verified()
+        let host = try await availableHosting(for: name)
+        let root = try await IdentityPrivateKey(backend.makePrivateKey(.ed25519, for: .identity))
+        let device = try makeDevice()
+        let user = HostedContent(home: Home(dc: dc.id, epoch: 1, expiresAt: backend.now + 180 * Self.day), domains: [name])
+        let identity = try await BasicIdentity<AnyBlahProfile>(.user(user), identityKey: root, deviceKey: device.key,
+            profileLifetime: 180 * Self.day, deviceLifetime: 180 * Self.day, using: backend)
+        var record = try await makeRecord(identity: identity, deviceReference: device.reference, biometrics: biometrics, sync: sync)
+        try rememberHome(home, profile: identity.profile, record: &record)
+        record.hostingDomain = host
+        try await save(identity: identity, record: record)
+        var current = Session(identity: identity, record: record, expires: backend.now + Self.timeout)
+        let publication = try await publication(&current)
+        return BlahMintResult(id: identity.id.description, publication: publication)
+    }
+
+    public func confirmPublication(id: String) async throws {
+        try begin(); defer { finish() }
+        var record = try readRecord(id)
+        let profile = try AnyBlahProfile(encoding: Array(record.profile))
+        try await profile.verify(using: backend)
+        try await requirePublication(profile)
+        try checkActive()
+        record.publishedProfile = record.profile
+        record.checkedProfile = record.profile
+        try writeRecord(record, id: id)
+        for (slot, var current) in sessions where current.identity.id.description == id {
+            current.record = record
+            sessions[slot] = current
+        }
+    }
+
+    private func availableHosting(for domain: DomainName) async throws -> String? {
+        let labels = domain.name.split(separator: ".", maxSplits: 1)
+        guard labels.count == 2, let host = DomainName(normalizing: String(labels[1])) else { return nil }
+        let client = ProfileHostingClient(domain: host, http: BlahHostingHTTPClient(detectUnsupportedHosting: true))
+        do {
+            _ = try await client.policy()
+        } catch {
+            if hostingUnavailable(error, policy: true) { return nil }
+            throw error
+        }
+        do {
+            switch try await client.name(String(labels[0])).status {
+            case .available: return host.name
+            case .claimed: throw ProfileHostingError.nameTaken(String(labels[0]))
+            case .invalid: throw ProfileHostingError.invalidLabel(String(labels[0]))
+            }
+        } catch {
+            if hostingUnavailable(error) { return nil }
+            throw error
+        }
+    }
+
+    private func hostingUnavailable(_ error: Error, policy: Bool = false) -> Bool {
+        if let error = error as? URLError {
+            return [.cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .timedOut,
+                .networkConnectionLost, .notConnectedToInternet, .secureConnectionFailed,
+                .serverCertificateHasBadDate, .serverCertificateUntrusted, .serverCertificateHasUnknownRoot,
+                .serverCertificateNotYetValid, .clientCertificateRejected, .clientCertificateRequired].contains(error.code)
+        }
+        guard let error = error as? ProfileHostingError else { return false }
+        switch error {
+        case let .unexpectedStatus(status): return [404, 405, 501].contains(status)
+        case .invalidResponse, .domainMismatch, .unsupportedAlgorithm: return policy
+        default: return false
+        }
+    }
+
+    private func publication(_ current: inout Session) async throws -> BlahPublication {
+        if current.record.hostingDomain != nil {
+            do {
+                try await publishHosted(&current)
+                try await requirePublication(current.identity.profile)
+                current.record.checkedProfile = Data(current.identity.profile.encoding)
+                try await persist(&current)
+                return .published
+            } catch {
+                // A failed read-back after an accepted PUT is an error, not unavailable hosting.
+                guard current.record.publishedProfile != Data(current.identity.profile.encoding), hostingUnavailable(error) else { throw error }
+            }
+        }
+        return .manual(profile: Data(current.identity.profile.encoding),
+            url: "https://\(current.identity.profile.domains[0].name)/.well-known/blah/profile.cbor")
+    }
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+public struct BlahDeviceLinkRequestData: Sendable {
+    public let id: UUID
+    public let request: Data
+    public let parameter: String
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+public struct BlahDeviceLinkPreparation: Sendable {
+    public let profile: Data
+    public let publication: BlahPublication
+}
+
+@available(iOS 18.0, macOS 15.0, *)
+extension BlahIdentityStore {
+    public func beginDeviceLink(id: UUID = UUID(), slot: String, label: String, expectedDomain: String?) async throws -> BlahDeviceLinkRequestData {
+        try begin(); defer { finish() }
+        guard let home = try self.home(slot: slot) else { throw BlahIdentityError.wrongHome }
+        _ = try await home.verified()
+        let generation = linkGeneration
+        deviceLinks = deviceLinks.filter { $0.value.expires > backend.now && $0.value.slot != slot }
+        let device = try makeDevice()
+        let recipient = try EncryptionPrivateKey.secureEnclave(accessControl: accessControl(biometrics: false))
+        // Advertise only the algorithms supported by this device’s crypto backend.
+        var verifies: [PublicKey.Algorithm] = [.ed25519, .p256]
+        if #available(iOS 26.0, macOS 26.0, *) { verifies.append(.mlDSA65) }
+        let request = try DeviceLinkRequest(device: device.key.publicKey, recipient: recipient.key.publicKey,
+            label: label, verifies: verifies)
+        let code = try DeviceLinkCode(request: request, using: backend)
+        try checkActive()
+        guard generation == linkGeneration else { throw BlahIdentityError.locked }
+        deviceLinks[id] = PendingDeviceLink(generation: generation, slot: slot, home: home,
+            expectedDomain: try expectedDomain.map { try BlahProfileHost.domain($0) }, request: request, code: code,
+            device: device.key, deviceReference: device.reference, recipient: recipient.key,
+            encryptionReference: recipient.reference, expires: backend.now + 600)
+        return BlahDeviceLinkRequestData(id: id, request: Data(request.encoding), parameter: code.parameter)
+    }
+
+    public func cancelDeviceLink(id: UUID) {
+        deviceLinks.removeValue(forKey: id)
+        if let installed = installedDeviceLinks.removeValue(forKey: id),
+            sessions[installed.slot]?.identity.deviceKey.publicKey.id == installed.device {
+            sessions.removeValue(forKey: installed.slot)
+            renewalTasks.removeValue(forKey: installed.slot)?.cancel()
+        }
+    }
+
+    public func finishDeviceLink(id: UUID) {
+        deviceLinks.removeValue(forKey: id)
+        installedDeviceLinks.removeValue(forKey: id)
+    }
+
+    public func installDeviceLink(id: UUID, request: Data, response: Data) async throws -> String {
+        try begin(); defer { finish() }
+        guard let pending = deviceLinks[id], pending.expires > backend.now,
+            pending.generation == linkGeneration, request == Data(pending.request.encoding) else { throw BlahIdentityError.locked }
+        let (dc, content) = try await pending.home.verified()
+        guard let currentHome = try home(slot: pending.slot), currentHome.domain == pending.home.domain,
+            let namespaceGeneration = content.namespaceGeneration else { throw BlahIdentityError.wrongHome }
+        let (currentDC, _) = try await currentHome.verified()
+        try BlahProfileHost.requireMonotonic(currentDC, after: dc)
+        let opened = try await DeviceLinkResponse.open(Array(response), recipientKey: pending.recipient,
+            request: pending.request, code: pending.code, expectedDC: dc.id, using: backend)
+        try await opened.grant.verify(for: pending.request, expectedDC: dc.id, using: backend)
+        if let expected = pending.expectedDomain {
+            guard opened.profile.domains.contains(expected) else { throw BlahIdentityError.wrongHome }
+        }
+        let identity = try await BasicIdentity<AnyBlahProfile>(profile: opened.profile, deviceKey: pending.device,
+            identityKey: opened.identityKey, profileLifetime: 180 * Self.day, deviceLifetime: 180 * Self.day, using: backend)
+        let namespace = try ClientNamespace(profile: opened.profile,
+            dc: DCAddress(domain: DomainName(pending.home.domain), id: dc.id), generation: namespaceGeneration)
+        if let binding = try restoreKeychain.read("binding:" + pending.slot), binding != Data(namespace.identifier.utf8) {
+            throw BlahIdentityError.wrongHome
+        }
+        guard try recordData(identity.id.description) == nil else { throw BlahIdentityError.duplicate }
+        try await requirePublication(opened.profile)
+        var record = Record(profile: Data(opened.grant.profile), rootBox: opened.grant.identityKey.map { Data($0.encoding) },
+            encryptionReference: pending.encryptionReference, deviceReference: pending.deviceReference,
+            biometrics: false, sync: false, autoRenew: opened.identityKey != nil,
+            homeDomain: pending.home.domain, home: currentHome,
+            publishedProfile: Data(opened.grant.profile), checkedProfile: Data(opened.grant.profile))
+        if let metadata = opened.grant.metadata {
+            let fields = try CBOR(decoding: metadata).recordValue(requiredKeys: 0..<0)
+            if let hosting = fields[7] {
+                let host = try hosting.recordValue(requiredKeys: 0..<3)[0]!.textValue()
+                let client = ProfileHostingClient(domain: try DomainName(host), http: BlahHostingHTTPClient())
+                guard !client.labels(in: opened.profile).isEmpty else { throw BlahIdentityError.invalidProfile }
+                record.hostingDomain = host
+            }
+        }
+        try checkActive()
+        guard deviceLinks[id] != nil, pending.generation == linkGeneration else { throw BlahIdentityError.locked }
+        try await save(identity: identity, record: record)
+        setSession(pending.slot, identity: identity, record: record)
+        installedDeviceLinks[id] = (pending.slot, identity.deviceKey.publicKey.id)
+        deviceLinks.removeValue(forKey: id)
+        return identity.id.description
+    }
+
+    public func prepareDeviceLinkApproval(slot: String, id: String, account: Int64, request: Data) async throws -> BlahDeviceLinkPreparation {
+        try begin(); defer { finish() }
+        var current = try session(slot)
+        try requireApprover(current, slot: slot, id: id, account: account)
+        let request = try DeviceLinkRequest(encoding: Array(request))
+        try request.requireCompatible(identityKey: current.identity.profile.identityKey, device: current.identity.deviceKey.publicKey)
+        if !current.identity.profile.devices.contains(where: { $0.device == request.device && $0.validity.contains(backend.now) }) {
+            try await publishHosted(&current)
+            try await current.identity.add(request.device)
+            try await persist(&current)
+        }
+        let result = try await publication(&current)
+        return BlahDeviceLinkPreparation(profile: Data(current.identity.profile.encoding), publication: result)
+    }
+
+    public func sealDeviceLinkApproval(slot: String, id: String, account: Int64, request: Data, parameter: String,
+        profile: Data, transferIdentity: Bool) async throws -> Data {
+        try begin(); defer { finish() }
+        var current = try session(slot)
+        try requireApprover(current, slot: slot, id: id, account: account)
+        guard profile == Data(current.identity.profile.encoding) else { throw BlahIdentityError.staleProfile }
+        let request = try DeviceLinkRequest(encoding: Array(request))
+        let code = try DeviceLinkCode(parameter: parameter)
+        guard code.matches(request.encoding) else { throw BlahIdentityError.invalidProfile }
+        try await requirePublication(current.identity.profile)
+        current.record.publishedProfile = profile
+        current.record.checkedProfile = profile
+        try await persist(&current)
+        let sealed: SealedIdentityKey?
+        var metadata: [UInt64: CBOR] = [:]
+        if transferIdentity {
+            guard let root = current.identity.identityKey else { throw BlahIdentityError.managementRequired }
+            sealed = try await root.sealed(to: request.recipient, using: backend)
+            if let host = current.record.hostingDomain {
+                let client = ProfileHostingClient(domain: try DomainName(host), http: BlahHostingHTTPClient())
+                metadata[7] = .record([0: .text(host), 1: .array(client.labels(in: current.identity.profile).map(CBOR.text)), 2: .array([])])
+            }
+        } else { sealed = nil }
+        let grant = try DeviceLinkGrant(profile: current.identity.profile, domain: current.identity.profile.domains[0],
+            identityKey: sealed, metadata: transferIdentity ? CBOR.record(metadata).encoded : nil)
+        let response = try await DeviceLinkResponse.seal(grant, for: request, code: code, using: backend)
+        try checkActive()
+        return Data(response)
+    }
+
+    private func requireApprover(_ current: Session, slot: String, id: String, account: Int64) throws {
+        guard try boundIdentityID(slot: slot) == id, current.identity.id.description == id,
+            case .user = current.identity.profile, current.identity.profile.home?.account == account else {
+            throw BlahIdentityError.wrongHome
+        }
+        guard current.identity.identityKey != nil else { throw BlahIdentityError.managementRequired }
     }
 }

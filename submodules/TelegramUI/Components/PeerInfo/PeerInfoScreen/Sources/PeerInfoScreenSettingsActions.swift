@@ -85,7 +85,11 @@ extension PeerInfoScreenNode {
         case .recentCalls:
             push(CallListController(context: context, mode: .navigation))
         case .blahIdentity:
-            push(blahIdentityController(network: self.context.account.network, presentationData: self.presentationData))
+            push(blahIdentityController(network: self.context.account.network, sourceAccountId: self.context.account.id, sharedContext: self.context.sharedContext,
+                presentationData: self.presentationData, beginNewAuth: { [weak self] in
+                    guard let self else { return }
+                    self.context.sharedContext.beginNewAuth(testingEnvironment: self.context.account.testingEnvironment)
+                }))
         case .devices:
             let _ = (self.activeSessionsContextAndCount.get()
             |> take(1)

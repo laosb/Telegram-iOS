@@ -64,6 +64,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     weak var confirmationController: PhoneConfirmationController?
     
     private let termsDisposable = MetaDisposable()
+    private let identityDeviceLinkDisposable = MetaDisposable()
     
     private let hapticFeedback = HapticFeedback()
     
@@ -108,6 +109,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     
     deinit {
         self.termsDisposable.dispose()
+        self.identityDeviceLinkDisposable.dispose()
     }
     
     @objc private func cancelPressed() {
@@ -351,7 +353,9 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        if !self.animatingIn {
+        if let account = self.account, let action = BlahIdentitySignInHandoff.take(excluding: account.id) {
+            self.openIdentityList(action: action)
+        } else if !self.animatingIn {
             self.controllerNode.activateInput()
         }
     }
@@ -396,21 +400,44 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         return true
     }
     
+    private func openIdentityList(action: BlahIdentitySignInAction? = nil) {
+        guard let account = self.account else { return }
+        let identityController = blahIdentityController(network: account.network, sourceAccountId: account.id, sharedContext: self.sharedContext, presentationData: self.presentationData,
+            signIn: { [weak self] domain, failed in
+                guard let self else { return }
+                self.identitySignInFailed = failed
+                self.loginWithNumber?(domain, false)
+            }, cancelSignIn: { [weak self] in
+                self?.cancelIdentitySignIn?()
+                self?.identitySignInFailed = nil
+                self?.identityDeviceLinkDisposable.set(nil)
+            }, beginNewAuth: { [weak self] in
+                self?.sharedContext.beginNewAuth(testingEnvironment: account.testingEnvironment)
+            }, initialAction: action, completeDeviceLink: { [weak self] state, completed in
+                guard let self else { return }
+                let signal: Signal<Void, BlahDeviceLinkError>
+                switch state {
+                case let .signedIn(authorization):
+                    signal = blahCompleteDeviceLinkSignIn(accountManager: self.sharedContext.accountManager,
+                        account: account, authorization: authorization, syncContacts: false, willCommit: { completed(nil) })
+                case .passwordNeeded:
+                    signal = blahContinueDeviceLinkWithPassword(account: account, syncContacts: false, willCommit: { completed(nil) })
+                default:
+                    return
+                }
+                self.identityDeviceLinkDisposable.set((signal |> deliverOnMainQueue).start(error: { error in
+                    completed(error.localizedDescription)
+                }))
+            })
+        (self.navigationController as? NavigationController)?.pushViewController(identityController)
+    }
+
     @objc func nextPressed() {
         guard !self.inProgress, self.confirmationController == nil else {
             return
         }
-        if let account = self.account {
-            let identityController = blahIdentityController(network: account.network, presentationData: self.presentationData,
-                signIn: { [weak self] domain, failed in
-                    guard let self else { return }
-                    self.identitySignInFailed = failed
-                    self.loginWithNumber?(domain, false)
-                }, cancelSignIn: { [weak self] in
-                    self?.cancelIdentitySignIn?()
-                    self?.identitySignInFailed = nil
-                })
-            (self.navigationController as? NavigationController)?.pushViewController(identityController)
+        if self.account != nil {
+            self.openIdentityList()
             return
         }
         let (_, _, number) = self.controllerNode.codeAndNumber

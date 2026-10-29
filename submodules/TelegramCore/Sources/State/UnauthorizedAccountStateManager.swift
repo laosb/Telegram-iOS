@@ -78,12 +78,14 @@ final class UnauthorizedAccountStateManager {
             if self.updateService == nil {
                 self.updateService = UnauthorizedUpdateMessageService()
                 let updateLoginToken = self.updateLoginToken
+                let blahLoginTokenEvents = self.network.blahLoginTokenEvents
                 let updateSentCode = self.updateSentCode
                 let displayServiceNotification = self.displayServiceNotification
                 self.updateServiceDisposable.set(self.updateService!.pipe.signal().start(next: { updates in
                     for update in updates {
                         switch update {
                         case .updateLoginToken:
+                            blahLoginTokenEvents.putNext(())
                             updateLoginToken()
                         case let .updateServiceNotification(updateServiceNotificationData):
                             let (flags, message) = (updateServiceNotificationData.flags, updateServiceNotificationData.message)

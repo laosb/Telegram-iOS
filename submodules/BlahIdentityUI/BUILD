@@ -8,6 +8,9 @@ swift_library(
         "//submodules/BlahIdentity", "@swiftpkg_blahdiem//:BlahDiem",
         "//submodules/TelegramCore", "//submodules/TelegramPresentationData", "//submodules/Display",
         "//submodules/ItemListUI", "//submodules/SSignalKit/SwiftSignalKit",
+        "//submodules/AsyncDisplayKit", "//submodules/AccountContext",
+        "//submodules/SolidRoundedButtonNode", "//submodules/PresentationDataUtils",
+        "//submodules/QrCode", "//submodules/QrCodeUI",
     ],
     visibility = ["//visibility:public"],
 )

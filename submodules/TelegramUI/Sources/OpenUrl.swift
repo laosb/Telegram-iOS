@@ -1,6 +1,7 @@
 import Foundation
 import Display
 import TelegramCore
+import BlahDeviceLinkUI
 import SwiftSignalKit
 import MtProtoKit
 import TelegramPresentationData
@@ -587,15 +588,16 @@ private func openCheckedExternalUrl(context: AccountContext, urlContext: OpenURL
                         return
                     }
                 case "login":
-                    if let _ = params["token"] {
-                        let alertController = textAlertController(
-                            context: context,
-                            title: nil,
-                            text: presentationData.strings.AuthSessions_AddDevice_UrlLoginHint,
-                            actions: [TextAlertAction(type: .genericAction, title: presentationData.strings.Common_OK, action: {})],
-                            parseMarkdown: true
-                        )
-                        context.sharedContext.presentGlobalController(alertController, nil)
+                    if params.items.contains(where: { $0.name == "token" || $0.name == "blah" }) {
+                        dismissInput()
+                        let sessions = context.engine.privacy.activeSessions()
+                        let controller = blahDeviceLinkController(account: context.account, url: url,
+                            presentationData: presentationData, activeSessionsContext: sessions, completion: { linked in
+                                if linked, let navigationController {
+                                    navigationController.pushViewController(context.sharedContext.makeRecentSessionsController(context: context, activeSessionsContext: sessions))
+                                }
+                            })
+                        context.sharedContext.presentGlobalController(controller, nil)
                         return
                     }
                     if let code = params["code"] {

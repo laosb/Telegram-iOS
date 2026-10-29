@@ -713,6 +713,7 @@ func initializedNetwork(accountId: AccountRecordId, arguments: NetworkInitializa
             let network = Network(queue: queue, datacenterId: datacenterId, context: context, engine: engine, switchingEngine: switchingEngine, engineFactory: arguments.networkEngineFactory, rustEngineDisabled: rustEngineDisabled, rustEngineWaitsForWebProxy: rustEngineWaitsForWebProxy, mainSession: mainSession, mainSessionDelegate: mainSessionDelegate, telemetry: telemetry, _connectionStatus: connectionStatus, basePath: basePath, appDataDisposable: appDataDisposable, encryptionProvider: arguments.encryptionProvider, useRequestTimeoutTimers: useRequestTimeoutTimers, useBetaFeatures: arguments.useBetaFeatures, useExperimentalFeatures: useExperimentalFeatures, baseTcpConnectionInterfaceFactory: baseTcpConnectionInterfaceFactory, isAppExtension: isAppExtension, initialWebProxyActive: initialActiveServer?.isWebProxy == true)
             
             network.blahRequiresRestoredBinding = requireBlahBinding
+            network.blahApiHash = arguments.apiHash
             network.restoreBlahHome()
 
             if let data = appConfiguration.data, let notifyInterval = data["upload_premium_speedup_notify_period"] as? Double {
@@ -885,6 +886,8 @@ public final class Network: NSObject {
     var blahRequiresRestoredBinding = false
     let blahHomeReady = ValuePromise<Bool>(false, ignoreRepeated: true)
     let blahIdentityError = Atomic<String?>(value: nil)
+    var blahApiHash = ""
+    let blahLoginTokenEvents = ValuePipe<Void>()
     private let mainSessionDelegate: NetworkMainSessionDelegate
     /// Records requests and failures of every session, whichever engine runs them. Nil unless
     /// `network_telemetry_enabled` was set when the network started (always set in Debug builds).
@@ -1407,7 +1410,7 @@ public final class Network: NSObject {
                     return nil
                 },
                 options: NetworkEngineRequestOptions(),
-                shouldContinueAfterError: data.0.name == "blah.invokeWithIdentityProof" ? { _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
+                shouldContinueAfterError: data.0.name.hasPrefix("blah.") ? { _ in false } : networkRequestErrorPolicy(automaticFloodWait: automaticFloodWait, onFloodWaitError: onFloodWaitError, failOnServerErrors: false),
                 dependsOn: networkRequestDependency(tag: tag),
                 acknowledged: nil,
                 progress: nil,

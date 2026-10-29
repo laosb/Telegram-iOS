@@ -88,6 +88,7 @@ struct BlahRestoreKeychain {
 @available(iOS 18.0, macOS 15.0, *)
 public enum BlahIdentityError: Error, LocalizedError {
     case keychain(OSStatus), unavailable, locked, invalidProfile, wrongHome, staleProfile, publicationRequired, duplicate, profileUnavailable
+    case profileVerificationFailed, managementRequired
 
     public var errorDescription: String? {
         switch self {
@@ -100,6 +101,8 @@ public enum BlahIdentityError: Error, LocalizedError {
         case .publicationRequired: return "Publish the latest profile at every listed domain, then sign in again."
         case .duplicate: return "This identity is already saved. Unlock its current copy."
         case .profileUnavailable: return "The profile server could not be reached."
+        case .profileVerificationFailed: return "This domain serves an identity profile whose signature or validity could not be verified."
+        case .managementRequired: return "This device does not hold permission to manage the identity."
         }
     }
 }

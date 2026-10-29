@@ -41,7 +41,7 @@ public struct BlahHome: Codable, Sendable {
 
 @available(iOS 18.0, macOS 15.0, *)
 public enum BlahProfileHost {
-    static func homeDomain(_ input: String) throws -> DomainName {
+    public static func homeDomain(_ input: String) throws -> DomainName {
         var value = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if value.hasPrefix("https://") {
             value.removeFirst(8)
@@ -51,7 +51,7 @@ public enum BlahProfileHost {
         return domain
     }
 
-    static func domain(_ input: String) throws -> DomainName {
+    public static func domain(_ input: String) throws -> DomainName {
         guard let domain = DomainName(normalizing: input.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw BlahIdentityError.invalidProfile
         }
@@ -95,6 +95,7 @@ public enum BlahProfileHost {
 @available(iOS 18.0, macOS 15.0, *)
 struct BlahHostingHTTPClient: HostingHTTPClient {
     var serverErrorsAreUnavailable = false
+    var detectUnsupportedHosting = false
 
     func send(_ outbound: HostingHTTPRequest) async throws -> HostingHTTPResponse {
         guard let url = URL(string: outbound.url), url.scheme == "https",
@@ -118,6 +119,10 @@ struct BlahHostingHTTPClient: HostingHTTPClient {
         for (name, value) in outbound.headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         let (bytes, response) = try await session.bytes(for: request)
+        if detectUnsupportedHosting, let response = response as? HTTPURLResponse,
+            [404, 405, 501].contains(response.statusCode) {
+            throw ProfileHostingError.unexpectedStatus(response.statusCode)
+        }
         if serverErrorsAreUnavailable, let response = response as? HTTPURLResponse, (500...599).contains(response.statusCode) {
             throw BlahIdentityError.profileUnavailable
         }
@@ -137,7 +142,11 @@ struct BlahHostingHTTPClient: HostingHTTPClient {
             let name = String(describing: name).lowercased()
             headers[name] = headers[name].map { $0 + ", " + String(describing: value) } ?? String(describing: value)
         }
-        return HostingHTTPResponse(status: response.statusCode, headers: headers, body: Array(data))
+        let result = HostingHTTPResponse(status: response.statusCode, headers: headers, body: Array(data))
+        if detectUnsupportedHosting, result.status != 200, (try? HostingProblem(response: result)) == nil {
+            throw ProfileHostingError.unexpectedStatus(result.status)
+        }
+        return result
     }
 }
 
