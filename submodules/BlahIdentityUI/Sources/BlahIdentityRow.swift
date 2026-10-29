@@ -4,7 +4,7 @@ import TelegramPresentationData
 
 struct IdentityRow: ItemListNodeEntry {
     enum Kind: Hashable {
-        case header, text, disclosure, `switch`, action
+        case header, text, removable, disclosure, `switch`, action
     }
 
     struct StableId: Hashable {
@@ -21,9 +21,11 @@ struct IdentityRow: ItemListNodeEntry {
     var isHeader = false
     var isDestructive = false
     var isEnabled = true
+    var isRemovable = false
     private var kind: Kind {
         if isHeader { return .header }
         else if isText { return .text }
+        else if isRemovable { return .removable }
         else if detail != nil { return .disclosure }
         else if value != nil { return .switch }
         else { return .action }
@@ -40,6 +42,12 @@ struct IdentityRow: ItemListNodeEntry {
             return ItemListSectionHeaderItem(presentationData: presentationData, text: title, sectionId: section)
         } else if isText {
             return ItemListTextItem(presentationData: presentationData, text: .plain(title), sectionId: section)
+        } else if isRemovable {
+            return ItemListCheckboxItem(presentationData: presentationData, systemStyle: .glass,
+                title: title, subtitle: detail, subtitleNumberOfLines: 0, style: .right, checked: false,
+                enabled: isEnabled, zeroSeparatorInsets: false, sectionId: section,
+                action: { actions.invoke(self.index, nil) },
+                deleteAction: isEnabled ? { actions.remove(self.index) } : nil)
         } else if let detail {
             return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass,
                 title: title, enabled: isEnabled, label: detail, labelStyle: .multilineDetailText,
@@ -58,5 +66,6 @@ struct IdentityRow: ItemListNodeEntry {
 
 final class IdentityActions {
     var invoke: (Int32, Bool?) -> Void = { _, _ in }
+    var remove: (Int32) -> Void = { _ in }
 }
 

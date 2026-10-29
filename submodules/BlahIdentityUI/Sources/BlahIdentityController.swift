@@ -22,6 +22,7 @@ public func blahIdentityController(network: Network, sourceAccountId: AccountRec
         signIn: signIn, cancelSignIn: cancelSignIn, beginNewAuth: beginNewAuth, completeDeviceLink: completeDeviceLink)
     let actions = IdentityActions()
     actions.invoke = { [weak coordinator] id, _ in coordinator?.invoke(id) }
+    actions.remove = { [weak coordinator] id in coordinator?.remove(id) }
     let signal = coordinator.rows.get() |> map { rows -> (ItemListControllerState, (ItemListNodeState, IdentityActions)) in
         let presentation = ItemListPresentationData(presentationData)
         return (ItemListControllerState(presentationData: presentation, title: .text(presentationData.strings.blah_Identity_Title),
@@ -58,6 +59,10 @@ private final class IdentityListCoordinator {
     private var pendingDetailsID: String?
     private var admissionEmails: [String: String] = [:]
     private var actions: [Int32: () -> Void] = [:]
+    private var removals: [Int32: () -> Void] = [:]
+    private var removalCompletion: ((Bool) -> Void)?
+    private weak var removalController: ViewController?
+    private var isRemoving = false
     private var task: Task<Void, Never>?
     private var generation = 0
     private var isBusy = false
@@ -99,7 +104,8 @@ private final class IdentityListCoordinator {
         admissionEmails = [:]
         if isSigningIn { cancelSignIn?() }
         isSigningIn = false
-        isBusy = false
+        isBusy = isRemoving
+        completeRemoval(false)
         Task { await BlahIdentityStore.shared.lock() }
         render()
     }
@@ -107,6 +113,11 @@ private final class IdentityListCoordinator {
     func invoke(_ id: Int32) {
         guard !isBusy, !isSigningIn else { return }
         actions[id]?()
+    }
+
+    func remove(_ id: Int32) {
+        guard !isBusy, !isSigningIn else { return }
+        removals[id]?()
     }
 
     func reload(action: BlahIdentitySignInAction? = nil, detailsID: String? = nil) {
@@ -136,23 +147,32 @@ private final class IdentityListCoordinator {
     private func render() {
         var entries: [IdentityRow] = []
         actions = [:]
-        func row(_ title: String, section: Int32 = 0, detail: String? = nil, text: Bool = false, action: @escaping () -> Void = {}) {
+        removals = [:]
+        func row(_ title: String, section: Int32 = 0, detail: String? = nil, text: Bool = false,
+            remove: (() -> Void)? = nil, action: @escaping () -> Void = {}) {
             let id = Int32(entries.count)
             entries.append(IdentityRow(index: id, section: section, title: title, detail: detail, isText: text,
-                isEnabled: !isBusy && !isSigningIn))
+                isEnabled: !isBusy && !isSigningIn, isRemovable: remove != nil))
             actions[id] = action
+            removals[id] = remove
         }
         if let status = isSigningIn ? strings.blah_Identity_SigningIn : isBusy ? strings.blah_Identity_Working : message {
             row(status, text: true)
         }
         if saved.isEmpty { row(strings.blah_Identity_NoSaved, text: true) }
         for identity in saved {
-            row(identity.domain, detail: identity.id + "\n" + (identity.homeDomain ?? strings.blah_Identity_ChooseDC)) { [weak self] in
+            row(identity.domain, detail: identity.id + "\n" + (identity.homeDomain ?? strings.blah_Identity_ChooseDC), remove: { [weak self] in
+                guard let self, let controller = self.controller else { return }
+                self.confirmRemoval(identity.id, cloudOnly: false, from: controller)
+            }) { [weak self] in
                 self?.select(identity.id)
             }
         }
         for identity in cloud where !saved.contains(where: { $0.id == identity.id }) {
-            row(identity.domain, section: 1, detail: strings.blah_IdentityWizard_InCloud + "\n" + identity.id + "\n" + (identity.homeDomain ?? strings.blah_Identity_ChooseDC)) { [weak self] in
+            row(identity.domain, section: 1, detail: strings.blah_IdentityWizard_InCloud + "\n" + identity.id + "\n" + (identity.homeDomain ?? strings.blah_Identity_ChooseDC), remove: { [weak self] in
+                guard let self, let controller = self.controller else { return }
+                self.confirmRemoval(identity.id, cloudOnly: true, from: controller)
+            }) { [weak self] in
                 self?.restore(identity.id)
             }
         }
@@ -177,6 +197,7 @@ private final class IdentityListCoordinator {
                 guard let self, !Task.isCancelled, self.generation == generation else { return }
                 self.isBusy = false
                 self.message = error.localizedDescription
+                self.completeRemoval(false, error: error.localizedDescription)
                 self.render()
             }
         }
@@ -202,7 +223,108 @@ private final class IdentityListCoordinator {
 
     private func showDetails(_ id: String) {
         (controller?.navigationController as? NavigationController)?.pushViewController(
-            blahIdentityDetailsController(id: id, presentationData: presentationData))
+            blahIdentityDetailsController(id: id, presentationData: presentationData, remove: { [weak self] controller, completed in
+                guard let self else { completed(false); return }
+                self.confirmRemoval(id, cloudOnly: false, from: controller, completed: completed)
+            }))
+    }
+
+    private func completeRemoval(_ removed: Bool, error: String? = nil) {
+        let completed = removalCompletion
+        let controller = removalController
+        removalCompletion = nil
+        removalController = nil
+        completed?(removed)
+        if let error, let controller {
+            let alert = UIAlertController(title: strings.blah_Identity_Remove, message: error, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: strings.Common_OK, style: .cancel))
+            controller.present(alert, animated: true)
+        }
+    }
+
+    private func confirmRemoval(_ id: String, cloudOnly: Bool, from controller: ViewController, completed: @escaping (Bool) -> Void = { _ in }) {
+        guard !isBusy, !isSigningIn else { completed(false); return }
+        removalCompletion = completed
+        removalController = controller
+        var hasCloud = false
+        run {
+            hasCloud = try await BlahIdentityStore.shared.hasCloudRecovery(id: id)
+        } completed: { [weak self, weak controller] in
+            guard let self, let controller else { self?.completeRemoval(false); return }
+            let generation = self.generation
+            let text = cloudOnly ? self.strings.blah_Identity_RemoveCloudNotice
+                : hasCloud ? self.strings.blah_Identity_RemoveDeviceCloudNotice : self.strings.blah_Identity_RemoveDeviceNotice
+            let alert = UIAlertController(title: self.strings.blah_Identity_Remove, message: text, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: self.strings.Common_Cancel, style: .cancel) { [weak self] _ in
+                guard let self, self.generation == generation else { return }
+                self.completeRemoval(false)
+            })
+            func option(_ title: String, fromCloud: Bool) {
+                alert.addAction(UIAlertAction(title: title, style: .destructive) { [weak self] _ in
+                    guard let self, self.generation == generation else { return }
+                    self.removeIdentity(id, cloudOnly: cloudOnly, fromCloud: fromCloud)
+                })
+            }
+            if cloudOnly { option(self.strings.blah_Identity_RemoveCloud, fromCloud: true) }
+            else {
+                option(self.strings.blah_Identity_RemoveDevice, fromCloud: false)
+                if hasCloud { option(self.strings.blah_Identity_RemoveDeviceCloud, fromCloud: true) }
+            }
+            controller.present(alert, animated: true)
+        }
+    }
+
+    private func removeIdentity(_ id: String, cloudOnly: Bool, fromCloud: Bool) {
+        let accountManager = sharedContext.accountManager
+        let sourceAccountId = self.sourceAccountId
+        run { [weak self] in
+            try Task.checkCancellation()
+            self?.isRemoving = true
+            // Logout can remove this screen. Confirmed custody cleanup must outlive it.
+            let removal = Task { () -> (Bool, Error?) in
+                var removedSource = false
+                do {
+                    if cloudOnly {
+                        try await BlahIdentityStore.shared.removeCloud(id: id)
+                        return (false, nil)
+                    }
+                    let slots = try await BlahIdentityStore.shared.boundSlots(id: id)
+                    let view = await accountManager.accountRecords().get()
+                    let records = view.records.filter {
+                        $0.id != view.currentAuthAccount?.id && slots.contains(accountRecordIdPathName($0.id))
+                    }
+                    for record in records {
+                        await logoutFromAccount(id: record.id, accountManager: accountManager, alreadyLoggedOutRemotely: false).get()
+                        _ = await (accountManager.accountRecords() |> filter { view in
+                            !view.records.contains(where: { $0.id == record.id })
+                        }).get()
+                        if record.id == sourceAccountId { removedSource = true }
+                    }
+                    try await BlahIdentityStore.shared.removeIdentity(id: id, fromCloud: fromCloud)
+                    return (removedSource, nil)
+                } catch {
+                    return (removedSource, error)
+                }
+            }
+            do {
+                let (removedSource, error) = await removal.value
+                guard let self else { return }
+                self.isRemoving = false
+                if removedSource { self.cancel(); return }
+                if Task.isCancelled {
+                    self.isBusy = false
+                    if self.controller?.traceVisibility() == true { self.reload() }
+                    return
+                }
+                if let error { throw error }
+                self.saved = try await BlahIdentityStore.shared.list()
+                self.cloud = (try? await BlahIdentityStore.shared.cloudIdentities()) ?? []
+            } catch {
+                self?.isRemoving = false
+                if Task.isCancelled { self?.isBusy = false }
+                throw error
+            }
+        } completed: { [weak self] in self?.completeRemoval(true) }
     }
 
     private func handoff(_ action: BlahIdentitySignInAction) {
@@ -291,6 +413,6 @@ private final class IdentityListCoordinator {
                 case .dismissed, .signedIn: self.reload()
                 }
             })
-        controller.present(wizard, in: .window(.root), with: ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
+        controller.present(wizard, in: .window(.root))
     }
 }

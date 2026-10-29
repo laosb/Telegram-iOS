@@ -39,7 +39,7 @@ func identityWizardController(network: Network, sharedContext: SharedAccountCont
     let coordinator = IdentityWizardCoordinator(network: network, sharedContext: sharedContext, presentationData: presentationData,
         isLogin: isLogin, completeDeviceLink: completeDeviceLink, cancelSignIn: cancelSignIn, completed: completed)
     let navigation = NavigationController(mode: .single, theme: NavigationControllerTheme(presentationTheme: presentationData.theme))
-    let host = IdentityWizardHostController(navigation: navigation, coordinator: coordinator)
+    let host = IdentityWizardHostController(navigation: navigation, coordinator: coordinator, presentationData: presentationData)
     coordinator.host = host
     coordinator.navigation = navigation
     switch start {
@@ -49,22 +49,29 @@ func identityWizardController(network: Network, sharedContext: SharedAccountCont
     return host
 }
 
-private final class IdentityWizardHostController: ViewController {
+private final class IdentityWizardHostController: ViewController, StandalonePresentableController {
     private let navigation: NavigationController
     private let coordinator: IdentityWizardCoordinator
+    private let presentationData: PresentationData
     private var currentLayout: ContainerViewLayout?
     private var isAppearing = false
+    private var didAnimateIn = false
+    private var isDismissing = false
 
-    init(navigation: NavigationController, coordinator: IdentityWizardCoordinator) {
+    init(navigation: NavigationController, coordinator: IdentityWizardCoordinator, presentationData: PresentationData) {
         self.navigation = navigation
         self.coordinator = coordinator
+        self.presentationData = presentationData
         super.init(navigationBarPresentationData: nil)
-        self.statusBar.statusBarStyle = .Ignore
+        self.statusBar.statusBarStyle = presentationData.theme.intro.statusBarStyle.style
+        self.acceptsFocusWhenInOverlay = true
+        self.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: .portrait)
     }
     required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     deinit { self.coordinator.finish(.dismissed, dismiss: false) }
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
+        self.displayNode.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
         self.displayNodeDidLoad()
         self.navigation.setIgnoreAppearanceMethodInvocations(true)
         self.displayNode.view.addSubview(self.navigation.view)
@@ -89,6 +96,11 @@ private final class IdentityWizardHostController: ViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         self.navigation.viewDidAppear(animated)
+        if !self.didAnimateIn {
+            self.didAnimateIn = true
+            self.view.layer.animatePosition(from: CGPoint(x: 0.0, y: self.view.bounds.height), to: .zero,
+                duration: 0.3, timingFunction: CAMediaTimingFunctionName.easeOut.rawValue, additive: true)
+        }
     }
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
@@ -97,10 +109,20 @@ private final class IdentityWizardHostController: ViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         self.navigation.viewDidDisappear(animated)
-        // Native presentations can hide us without removing this modal from Display's stack.
-        if self.navigationController?.viewControllers.contains(where: { $0 === self }) != true {
+        if self.view.superview == nil || self.view.superview?.superview == nil {
             self.coordinator.finish(.dismissed, dismiss: false)
         }
+    }
+
+    override func dismiss(completion: (() -> Void)? = nil) {
+        guard !self.isDismissing else { return }
+        self.isDismissing = true
+        self.view.endEditing(true)
+        self.view.layer.animatePosition(from: .zero, to: CGPoint(x: 0.0, y: self.view.bounds.height),
+            duration: 0.2, removeOnCompletion: false, additive: true, completion: { [weak self] _ in
+                self?.presentingViewController?.dismiss(animated: false, completion: nil)
+                completion?()
+            })
     }
 }
 

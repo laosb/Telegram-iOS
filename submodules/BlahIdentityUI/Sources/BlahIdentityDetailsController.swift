@@ -7,8 +7,9 @@ import ItemListUI
 import SwiftSignalKit
 import TelegramPresentationData
 
-func blahIdentityDetailsController(id: String, presentationData: PresentationData) -> ViewController {
-    let coordinator = IdentityDetailsCoordinator(id: id, presentationData: presentationData)
+func blahIdentityDetailsController(id: String, presentationData: PresentationData,
+    remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) -> ViewController {
+    let coordinator = IdentityDetailsCoordinator(id: id, presentationData: presentationData, remove: remove)
     let actions = IdentityActions()
     actions.invoke = { [weak coordinator] id, value in coordinator?.invoke(id, value) }
     let signal = coordinator.rows.get() |> map { rows -> (ItemListControllerState, (ItemListNodeState, IdentityActions)) in
@@ -41,6 +42,7 @@ private final class IdentityDetailsCoordinator: NSObject {
     private let id: String
     private let slot = "identity-details:" + UUID().uuidString
     private let presentationData: PresentationData
+    private let remove: (ViewController, @escaping (Bool) -> Void) -> Void
     private var identity: BlahIdentityView?
     private var actions: [Int32: (Bool?) -> Void] = [:]
     private var isBusy = false
@@ -52,9 +54,10 @@ private final class IdentityDetailsCoordinator: NSObject {
     private var contentRows: [IdentityRow] = []
     private var strings: PresentationStrings { presentationData.strings }
 
-    init(id: String, presentationData: PresentationData) {
+    init(id: String, presentationData: PresentationData, remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) {
         self.id = id
         self.presentationData = presentationData
+        self.remove = remove
         super.init()
         observer = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main) { [weak self] _ in
@@ -210,6 +213,19 @@ private final class IdentityDetailsCoordinator: NSObject {
             row(strings.blah_Identity_Lock, section: 6) { [weak self] _ in self?.clearIdentity(); Task { await BlahIdentityStore.shared.lock() }; self?.refresh() }
         } else {
             row(strings.blah_IdentityWizard_Unlock) { [weak self] _ in self?.reload() }
+        }
+        row(strings.blah_Identity_Remove, section: 7, destructive: true) { [weak self] _ in
+            guard let self, let controller = self.controller else { return }
+            self.cancel()
+            self.isBusy = true
+            self.publishRows()
+            let generation = self.generation
+            self.remove(controller, { [weak self] removed in
+                guard let self, self.generation == generation else { return }
+                self.isBusy = false
+                self.publishRows()
+                if removed { self.controller?.dismiss() }
+            })
         }
         contentRows = entries
         publishRows()

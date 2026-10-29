@@ -45,7 +45,7 @@ public actor BlahIdentityStore {
     private var shouldLock = false
     private var linkGeneration: UInt64 = 0
     private var deviceLinks: [UUID: PendingDeviceLink] = [:]
-    private var installedDeviceLinks: [UUID: (slot: String, device: BlahDiem.Digest)] = [:]
+    private var installedDeviceLinks: [UUID: (slot: String, device: BlahDiem.Digest, identityID: String)] = [:]
 
     private struct PendingDeviceLink {
         let generation: UInt64
@@ -154,11 +154,46 @@ public actor BlahIdentityStore {
 
     public func remove(slot: String) throws {
         try begin(); defer { finish() }
-        for prefix in ["home:", "binding-v2:", "binding:"] {
-            try restoreKeychain.remove(prefix + slot)
-        }
+        try removeSlot(slot)
+    }
+
+    public func boundSlots(id: String) throws -> [String] {
+        return try restoreKeychain.keys().filter { $0.hasPrefix("binding-v2:") }.compactMap { key in
+            guard let data = try restoreKeychain.read(key),
+                try JSONDecoder().decode(Binding.self, from: data).identityID == id else { return nil }
+            return String(key.dropFirst("binding-v2:".count))
+        }.sorted()
+    }
+
+    public func hasCloudRecovery(id: String) throws -> Bool {
+        return try BlahKeychain.read("recovery:" + id, sync: true) != nil
+    }
+
+    /// Call after the bound accounts have finished logging out.
+    public func removeIdentity(id: String, fromCloud: Bool) throws {
+        try begin(); defer { finish() }
+        var slots = Set(try boundSlots(id: id))
+        slots.formUnion(sessions.compactMap { $0.value.identity.id.description == id ? $0.key : nil })
+        slots.formUnion(installedDeviceLinks.values.compactMap { $0.identityID == id ? $0.slot : nil })
+        for slot in slots { try removeSlot(slot) }
+        try BlahKeychain.remove("identity:" + id)
+        try BlahKeychain.remove("device-identity:" + id)
+        if fromCloud { try BlahKeychain.remove("recovery:" + id, sync: true) }
+    }
+
+    public func removeCloud(id: String) throws {
+        try begin(); defer { finish() }
+        try BlahKeychain.remove("recovery:" + id, sync: true)
+    }
+
+    private func removeSlot(_ slot: String) throws {
         sessions.removeValue(forKey: slot)
         renewalTasks.removeValue(forKey: slot)?.cancel()
+        deviceLinks = deviceLinks.filter { $0.value.slot != slot }
+        installedDeviceLinks = installedDeviceLinks.filter { $0.value.slot != slot }
+        for prefix in ["home:", "binding:", "binding-v2:"] {
+            try restoreKeychain.remove(prefix + slot)
+        }
     }
 
     public func create(domain: String, slot: String, biometrics: Bool, sync: Bool) async throws -> BlahIdentityView {
@@ -1009,7 +1044,7 @@ extension BlahIdentityStore {
         guard deviceLinks[id] != nil, pending.generation == linkGeneration else { throw BlahIdentityError.locked }
         try await save(identity: identity, record: record)
         setSession(pending.slot, identity: identity, record: record)
-        installedDeviceLinks[id] = (pending.slot, identity.deviceKey.publicKey.id)
+        installedDeviceLinks[id] = (pending.slot, identity.deviceKey.publicKey.id, identity.id.description)
         deviceLinks.removeValue(forKey: id)
         return identity.id.description
     }
