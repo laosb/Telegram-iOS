@@ -810,6 +810,12 @@ public func sendLoginEmailChangeCode(account: Account, email: String) -> Signal<
 }
 
 public func sendLoginEmailCode(account: UnauthorizedAccount, email: String) -> Signal<Never, AuthorizationSendEmailCodeError> {
+    return account.network.blahLoginOperation(genericError: .generic) { genericError in
+        return sendLoginEmailCode(account: account, email: email, genericError: genericError)
+    }
+}
+
+private func sendLoginEmailCode(account: UnauthorizedAccount, email: String, genericError: @escaping (MTRpcError) -> AuthorizationSendEmailCodeError) -> Signal<Never, AuthorizationSendEmailCodeError> {
     return account.postbox.transaction { transaction -> Signal<Never, AuthorizationSendEmailCodeError> in
         if let state = transaction.getState() as? UnauthorizedAccountState {
             switch state.contents {
@@ -826,7 +832,7 @@ public func sendLoginEmailCode(account: UnauthorizedAccount, email: String) -> S
                         } else if errorDescription.hasPrefix("EMAIL_NOT_ALLOWED") {
                             return .fail(.emailNotAllowed)
                         } else {
-                            return .fail(.generic)
+                            return .fail(genericError(error))
                         }
                     }
                     |> mapToSignal { result -> Signal<Never, AuthorizationSendEmailCodeError> in
@@ -890,6 +896,12 @@ public func verifyLoginEmailChange(account: Account, code: AuthorizationCode.Ema
 }
 
 public func verifyLoginEmailSetup(account: UnauthorizedAccount, code: AuthorizationCode.EmailVerification) -> Signal<Never, AuthorizationEmailVerificationError> {
+    return account.network.blahLoginOperation(genericError: .generic) { genericError in
+        return verifyLoginEmailSetup(account: account, code: code, genericError: genericError)
+    }
+}
+
+private func verifyLoginEmailSetup(account: UnauthorizedAccount, code: AuthorizationCode.EmailVerification, genericError: @escaping (MTRpcError) -> AuthorizationEmailVerificationError) -> Signal<Never, AuthorizationEmailVerificationError> {
     return account.postbox.transaction { transaction -> Signal<Never, AuthorizationEmailVerificationError> in
         if let state = transaction.getState() as? UnauthorizedAccountState {
             switch state.contents {
@@ -918,7 +930,7 @@ public func verifyLoginEmailSetup(account: UnauthorizedAccount, code: Authorizat
                         } else if errorDescription == "EMAIL_NOT_ALLOWED" {
                             return .fail(.emailNotAllowed)
                         } else {
-                            return .fail(.generic)
+                            return .fail(genericError(error))
                         }
                     }
                     |> mapToSignal { result -> Signal<Never, AuthorizationEmailVerificationError> in
@@ -1029,6 +1041,12 @@ public func resetLoginEmail(account: UnauthorizedAccount, phoneNumber: String, p
 }
 
 public func authorizeWithCode(accountManager: AccountManager<TelegramAccountManagerTypes>, account: UnauthorizedAccount, code: AuthorizationCode, termsOfService: UnauthorizedAccountTermsOfService?, forcedPasswordSetupNotice: @escaping (Int32) -> (NoticeEntryKey, CodableEntry)?) -> Signal<AuthorizeWithCodeResult, AuthorizationCodeVerificationError> {
+    return account.network.blahLoginOperation(genericError: .generic) { genericError in
+        return authorizeWithCode(accountManager: accountManager, account: account, code: code, termsOfService: termsOfService, forcedPasswordSetupNotice: forcedPasswordSetupNotice, genericError: genericError)
+    }
+}
+
+private func authorizeWithCode(accountManager: AccountManager<TelegramAccountManagerTypes>, account: UnauthorizedAccount, code: AuthorizationCode, termsOfService: UnauthorizedAccountTermsOfService?, forcedPasswordSetupNotice: @escaping (Int32) -> (NoticeEntryKey, CodableEntry)?, genericError: @escaping (MTRpcError) -> AuthorizationCodeVerificationError) -> Signal<AuthorizeWithCodeResult, AuthorizationCodeVerificationError> {
     return account.postbox.transaction { transaction -> Signal<AuthorizeWithCodeResult, AuthorizationCodeVerificationError> in
         if let state = transaction.getState() as? UnauthorizedAccountState {
             switch state.contents {
@@ -1065,7 +1083,7 @@ public func authorizeWithCode(accountManager: AccountManager<TelegramAccountMana
                                     if error.errorDescription.hasPrefix("FLOOD_WAIT") {
                                         return .limitExceeded
                                     } else {
-                                        return .generic
+                                        return genericError(error)
                                     }
                                 }
                                 |> mapToSignal { result -> Signal<AuthorizationCodeResult, AuthorizationCodeVerificationError> in
@@ -1089,7 +1107,7 @@ public func authorizeWithCode(accountManager: AccountManager<TelegramAccountMana
                                 } else if errorDescription == "EMAIL_ADDRESS_INVALID" {
                                     return .fail(.invalidEmailAddress)
                                 } else {
-                                    return .fail(.generic)
+                                    return .fail(genericError(error))
                                 }
                         }
                     }
@@ -1160,6 +1178,12 @@ public enum AuthorizationPasswordVerificationError {
 }
 
 public func authorizeWithPassword(accountManager: AccountManager<TelegramAccountManagerTypes>, account: UnauthorizedAccount, password: String, syncContacts: Bool) -> Signal<Void, AuthorizationPasswordVerificationError> {
+    return account.network.blahLoginOperation(genericError: .generic) { genericError in
+        return authorizeWithPassword(accountManager: accountManager, account: account, password: password, syncContacts: syncContacts, genericError: genericError)
+    }
+}
+
+private func authorizeWithPassword(accountManager: AccountManager<TelegramAccountManagerTypes>, account: UnauthorizedAccount, password: String, syncContacts: Bool, genericError: @escaping (MTRpcError) -> AuthorizationPasswordVerificationError) -> Signal<Void, AuthorizationPasswordVerificationError> {
     return verifyPassword(account, password: password)
     |> `catch` { error -> Signal<Api.auth.Authorization, AuthorizationPasswordVerificationError> in
         if error.errorDescription.hasPrefix("FLOOD_WAIT") {
@@ -1167,7 +1191,7 @@ public func authorizeWithPassword(accountManager: AccountManager<TelegramAccount
         } else if error.errorDescription == "PASSWORD_HASH_INVALID" {
             return .fail(.invalidPassword)
         } else {
-            return .fail(.generic)
+            return .fail(genericError(error))
         }
     }
     |> mapToSignal { result -> Signal<Void, AuthorizationPasswordVerificationError> in
@@ -1452,6 +1476,12 @@ public enum AccountResetError {
 }
 
 public func performAccountReset(account: UnauthorizedAccount) -> Signal<Void, AccountResetError> {
+    return account.network.blahLoginOperation(genericError: .generic) { genericError in
+        return performAccountReset(account: account, genericError: genericError)
+    }
+}
+
+private func performAccountReset(account: UnauthorizedAccount, genericError: @escaping (MTRpcError) -> AccountResetError) -> Signal<Void, AccountResetError> {
     return account.network.request(Api.functions.account.deleteAccount(flags: 0, reason: "", password: nil))
     |> map { _ -> Int32? in return nil }
     |> `catch` { error -> Signal<Int32?, AccountResetError> in
@@ -1460,12 +1490,12 @@ public func performAccountReset(account: UnauthorizedAccount) -> Signal<Void, Ac
             if let value = Int32(timeout) {
                 return .single(value)
             } else {
-                return .fail(.generic)
+                return .fail(genericError(error))
             }
         } else if error.errorDescription == "2FA_RECENT_CONFIRM" {
             return .fail(.limitExceeded)
         } else {
-            return .fail(.generic)
+            return .fail(genericError(error))
         }
     }
     |> mapToSignal { timeout -> Signal<Void, AccountResetError> in

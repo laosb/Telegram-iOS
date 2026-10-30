@@ -124,6 +124,7 @@ final class BlahIdentityWizardNode: ASDisplayNode, UITextFieldDelegate {
     }
 
     func activateInput() { if page.placeholder != nil { fieldNode.view.becomeFirstResponder() } }
+    func setPrimaryTitle(_ title: String) { primaryNode.title = title }
     func setQRImage(_ image: UIImage?) { imageNode.image = image }
     func setStatus(_ text: String?, error: Bool = false) {
         statusNode.attributedText = text.map { NSAttributedString(string: $0, font: Font.regular(15.0),

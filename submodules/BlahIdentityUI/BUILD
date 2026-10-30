@@ -7,6 +7,7 @@ swift_library(
     deps = [
         "//submodules/BlahIdentity", "@swiftpkg_blahdiem//:BlahDiem",
         "//submodules/TelegramCore", "//submodules/TelegramPresentationData", "//submodules/Display",
+        "//submodules/MtProtoKit",
         "//submodules/ItemListUI", "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/AsyncDisplayKit", "//submodules/AccountContext",
         "//submodules/SolidRoundedButtonNode", "//submodules/PresentationDataUtils",

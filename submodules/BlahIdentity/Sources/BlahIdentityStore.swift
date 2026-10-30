@@ -28,6 +28,14 @@ public struct BlahIdentityView: Sendable {
 }
 
 @available(iOS 18.0, macOS 15.0, *)
+public struct BlahPendingPublication: Sendable {
+    public let id: String
+    public let hostingDomain: String?
+    public let profile: Data
+    public let url: String
+}
+
+@available(iOS 18.0, macOS 15.0, *)
 public actor BlahIdentityStore {
     public static let shared: BlahIdentityStore = {
         let isAppExtension = Bundle.main.bundlePath.hasSuffix(".appex")
@@ -78,6 +86,7 @@ public actor BlahIdentityStore {
         var hostingDomain: String?
         var publishedProfile: Data?
         var checkedProfile: Data?
+        var refreshedProfile: Data?
     }
     private struct Recovery: Codable {
         let version: Int
@@ -377,19 +386,20 @@ public actor BlahIdentityStore {
     public func number(slot: String, account: Int64) async throws {
         try begin(); defer { finish() }
         var current = try session(slot)
-        try await publishHosted(&current)
-        guard let home = current.identity.profile.home, home.account == nil || home.account == account else { throw BlahIdentityError.wrongHome }
+        try requireAccount(current.identity.profile)
+        try await current.identity.profile.verify(using: backend)
+        guard let selectedHome = try self.home(slot: slot), let home = current.identity.profile.home,
+            home.isActive(at: backend.now), home.account == nil || home.account == account else { throw BlahIdentityError.wrongHome }
+        let (dc, _) = try await selectedHome.verified()
+        guard home.dc == dc.id else { throw BlahIdentityError.wrongHome }
         if home.account == nil {
             guard case .user(var user) = current.identity.profile.content else { throw BlahIdentityError.invalidProfile }
             user.home?.account = account
             try await current.identity.update(.user(user))
             try await persist(&current)
-            try await publishHosted(&current)
         }
-        try await requirePublication(current.identity.profile)
-        current.record.publishedProfile = Data(current.identity.profile.encoding)
-        current.record.checkedProfile = current.record.publishedProfile
-        try await persist(&current)
+        // Publication runs after login, outside auth.sendCode's request timeout.
+        try checkActive()
     }
 
     public enum Change: Sendable {
@@ -448,7 +458,7 @@ public actor BlahIdentityStore {
                 deviceDays: current.record.deviceDays, autoRenew: current.record.autoRenew,
                 homeDomain: current.record.homeDomain, home: current.record.home,
                 hostingDomain: current.record.hostingDomain, publishedProfile: current.record.publishedProfile,
-                checkedProfile: current.record.checkedProfile)
+                checkedProfile: current.record.checkedProfile, refreshedProfile: current.record.refreshedProfile)
         }
         try await persist(&current)
         if publishes { try await publishHosted(&current) }
@@ -722,6 +732,14 @@ public actor BlahIdentityStore {
         }
     }
 
+    private func publishProfile(_ profile: AnyBlahProfile, hosting: DomainName?) async throws {
+        if let hosting {
+            let host = ProfileHostingClient(domain: hosting, http: BlahHostingHTTPClient(detectUnsupportedHosting: true))
+            try await host.publish(profile, solver: BlahHostingProofOfWork())
+        }
+        try await requirePublication(profile)
+    }
+
     private func view(_ identity: BasicIdentity<AnyBlahProfile>, _ record: Record) throws -> BlahIdentityView {
         return BlahIdentityView(id: identity.id.description, profile: identity.profile, user: HostedContent(home: identity.profile.home, domains: identity.profile.domains),
             device: identity.deviceKey.publicKey, biometrics: record.biometrics, sync: record.sync,
@@ -880,11 +898,65 @@ extension BlahIdentityStore {
     }
 
     public func confirmPublication(id: String) async throws {
+        try await confirmPublication(id: id, retryHosted: false)
+    }
+
+    /// Reads the saved revision without unlocking the identity's private keys.
+    public func pendingPublication(slot: String) async throws -> BlahPendingPublication? {
+        guard let id = try boundIdentityID(slot: slot) else { return nil }
+        return try pendingPublication(id: id)
+    }
+
+    public func pendingPublication(id: String) throws -> BlahPendingPublication? {
+        let record = try readRecord(id)
+        guard record.checkedProfile != record.profile else { return nil }
+        let profile = try AnyBlahProfile(encoding: Array(record.profile))
+        try requireAccount(profile)
+        guard profile.id.description == id else { throw BlahIdentityError.invalidProfile }
+        return BlahPendingPublication(id: id, hostingDomain: record.hostingDomain, profile: record.profile,
+            url: "https://\(profile.domains[0].name)/.well-known/blah/profile.cbor")
+    }
+
+    public func refreshPending(slot: String) throws -> String? {
+        guard let id = try boundIdentityID(slot: slot) else { return nil }
+        let record = try readRecord(id)
+        guard record.checkedProfile == record.profile, record.refreshedProfile != record.profile else { return nil }
+        let profile = try AnyBlahProfile(encoding: Array(record.profile))
+        try requireAccount(profile)
+        guard profile.id.description == id else { throw BlahIdentityError.invalidProfile }
+        return profile.home?.account == nil ? nil : id
+    }
+
+    public func markRefreshed(id: String, profile: Data) throws {
+        try begin(); defer { finish() }
+        var record = try readRecord(id)
+        guard record.profile == profile else { return }
+        record.refreshedProfile = profile
+        try writeRecord(record, id: id)
+        for (slot, var current) in sessions where current.identity.id.description == id {
+            current.record.refreshedProfile = profile
+            sessions[slot] = current
+        }
+    }
+
+    /// Publishes the already signed revision and verifies every domain, even while locked.
+    public func retryPublication(id: String) async throws {
+        try await confirmPublication(id: id, retryHosted: true)
+    }
+
+    private func confirmPublication(id: String, retryHosted: Bool) async throws {
         try begin(); defer { finish() }
         var record = try readRecord(id)
         let profile = try AnyBlahProfile(encoding: Array(record.profile))
+        try requireAccount(profile)
+        guard profile.id.description == id else { throw BlahIdentityError.invalidProfile }
         try await profile.verify(using: backend)
-        try await requirePublication(profile)
+        let hosting = try (retryHosted ? record.hostingDomain.map { try DomainName($0) } : nil)
+        do {
+            try await publishProfile(profile, hosting: hosting)
+        } catch let error as ProfileHostingError {
+            throw BlahIdentityError.hosting(blahIdentityErrorDescription(error))
+        }
         try checkActive()
         record.publishedProfile = record.profile
         record.checkedProfile = record.profile

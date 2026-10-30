@@ -223,7 +223,7 @@ private final class IdentityListCoordinator {
 
     private func showDetails(_ id: String) {
         (controller?.navigationController as? NavigationController)?.pushViewController(
-            blahIdentityDetailsController(id: id, presentationData: presentationData, remove: { [weak self] controller, completed in
+            blahIdentityDetailsController(id: id, sharedContext: sharedContext, presentationData: presentationData, remove: { [weak self] controller, completed in
                 guard let self else { completed(false); return }
                 self.confirmRemoval(id, cloudOnly: false, from: controller, completed: completed)
             }))
@@ -391,13 +391,29 @@ private final class IdentityListCoordinator {
     }
 
     private func signInError(id: String, error: String) {
-        // Signup may have saved a numbered profile before publication failed.
-        let alert = UIAlertController(title: strings.blah_Identity_Title, message: error, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: strings.Common_OK, style: .cancel))
-        alert.addAction(UIAlertAction(title: strings.blah_IdentityWizard_Details, style: .default) { [weak self] _ in
-            self?.showDetails(id)
-        })
-        controller?.present(alert, animated: true)
+        let generation = self.generation
+        task = Task { @MainActor [weak self] in
+            let pending = try? await BlahIdentityStore.shared.pendingPublication(id: id)
+            guard let self, !Task.isCancelled, self.generation == generation else { return }
+            let alert = UIAlertController(title: self.strings.blah_Identity_Title, message: error, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: self.strings.Common_OK, style: .cancel))
+            if let pending {
+                alert.addAction(UIAlertAction(title: self.strings.blah_Identity_PublishProfile, style: .default) { [weak self] _ in
+                    guard let self, self.generation == generation, let controller = self.controller else { return }
+                    let publication = identityPublicationController(network: self.network, sharedContext: self.sharedContext,
+                        presentationData: self.presentationData, pending: pending, refreshAfterPublication: false,
+                        completed: { [weak self] published in
+                            guard let self, published, self.generation == generation else { return }
+                            self.select(id)
+                        })
+                    (controller.navigationController as? NavigationController)?.presentOverlay(controller: publication)
+                })
+            }
+            alert.addAction(UIAlertAction(title: self.strings.blah_IdentityWizard_Details, style: .default) { [weak self] _ in
+                self?.showDetails(id)
+            })
+            self.controller?.present(alert, animated: true)
+        }
     }
 
     private func wizard(start: IdentityWizardStart) {

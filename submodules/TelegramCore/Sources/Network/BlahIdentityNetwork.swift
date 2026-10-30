@@ -16,6 +16,27 @@ extension Network {
 
     public var blahIdentitySlot: String { return URL(fileURLWithPath: self.basePath).lastPathComponent }
 
+    func blahLoginOperation<T, E>(genericError: E, _ operation: @escaping (@escaping (MTRpcError) -> E) -> Signal<T, E>) -> Signal<T, E> {
+        return deferred {
+            let _ = self.blahIdentityError.swap(nil)
+            let message = Atomic<String?>(value: nil)
+            return operation { error in
+                let _ = message.swap(blahLoginErrorText(error.errorDescription)
+                    ?? "The DC refused the request (\(error.errorDescription)).")
+                return genericError
+            }
+            |> mapError { error in
+                let _ = self.blahIdentityError.swap(message.swap(nil))
+                return error
+            }
+        }
+    }
+
+    /// Makes the DC refetch the published profile under this account's device proof.
+    public func blahRefreshPublishedProfile(profile: Data? = nil) -> Signal<Never, MTRpcError> {
+        return self.blahProven(Api.functions.account.getAuthorizations(), expectedProfile: profile) |> ignoreValues
+    }
+
     func restoreBlahHome() {
         // initializedNetwork carries supplementary in the MTProto environment.
         let refresh = !self.context.apiEnvironment.disableUpdates
@@ -63,6 +84,13 @@ extension Network {
     }
 
     func blahRequest<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>)) -> Signal<T, MTRpcError> {
+        return deferred {
+            let _ = self.blahIdentityError.swap(nil)
+            return self.blahLoginRequest(data) |> mapError { self.blahStoreLoginError($0) }
+        }
+    }
+
+    private func blahLoginRequest<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>)) -> Signal<T, MTRpcError> {
         guard blahLoginMethods.contains(data.0.name) else {
             return .fail(MTRpcError(errorCode: 400, errorDescription: "BLAH_IDENTITY_REQUIRED"))
         }
@@ -72,7 +100,7 @@ extension Network {
         } else {
             request = self.blahRawRequest(data, automaticFloodWait: false)
         }
-        let authorized = request |> mapToSignal { result -> Signal<T, MTRpcError> in
+        return request |> mapToSignal { result -> Signal<T, MTRpcError> in
             var authorization = result as? Api.auth.Authorization
             if let sent = result as? Api.auth.SentCode, case let .sentCodeSuccess(value) = sent {
                 authorization = value.authorization
@@ -81,22 +109,19 @@ extension Network {
             let user = TelegramUser(user: value.user)
             return blahTask {
                 try await BlahIdentityStore.shared.number(slot: self.blahIdentitySlot, account: user.id.id._internalGetInt64Value())
-                return true
-            } |> mapToSignal { _ in
-                self.blahProven(Api.functions.account.getAuthorizations()) |> map { _ in result }
+                return try await BlahIdentityStore.shared.pendingPublication(slot: self.blahIdentitySlot) == nil
+            } |> mapToSignal { published -> Signal<T, MTRpcError> in
+                guard published else { return .single(result) }
+                return self.blahProven(Api.functions.account.getAuthorizations()) |> map { _ in result }
             }
         }
-        return authorized |> mapError { error in
-            if error.errorDescription.hasPrefix("BLAH_IDENTITY: ") {
-                let _ = self.blahIdentityError.swap(String(error.errorDescription.dropFirst(15)))
-            } else if error.errorDescription == "SIGNUP_EMAIL_REQUIRED" {
-                let _ = self.blahIdentityError.swap("SIGNUP_EMAIL_REQUIRED")
-            }
-            if error.errorDescription.contains("_MIGRATE_") {
-                return MTRpcError(errorCode: 400, errorDescription: "BLAH_HOME_MIGRATION_REFUSED")
-            }
-            return error
-        }
+    }
+
+    private func blahStoreLoginError(_ error: MTRpcError) -> MTRpcError {
+        let error = error.errorDescription.contains("_MIGRATE_")
+            ? MTRpcError(errorCode: 400, errorDescription: "BLAH_HOME_MIGRATION_REFUSED") : error
+        let _ = self.blahIdentityError.swap(blahLoginErrorText(error.errorDescription))
+        return error
     }
 
     func blahProven<T>(_ data: (FunctionDescription, Buffer, DeserializeFunctionResponse<T>), expectedProfile: Data? = nil) -> Signal<T, MTRpcError> {
@@ -144,11 +169,53 @@ func blahTask<T>(_ body: @escaping () async throws -> T) -> Signal<T, MTRpcError
                 let value = try await body()
                 if !Task.isCancelled { subscriber.putNext(value); subscriber.putCompletion() }
             } catch {
-                if !Task.isCancelled { subscriber.putError(MTRpcError(errorCode: 400, errorDescription: "BLAH_IDENTITY: " + error.localizedDescription)) }
+                if !Task.isCancelled { subscriber.putError(MTRpcError(errorCode: 400, errorDescription: "BLAH_IDENTITY: " + blahIdentityErrorDescription(error))) }
             }
         }
         return ActionDisposable { task.cancel() }
     }
+}
+
+func blahLoginErrorText(_ code: String) -> String? {
+    if code.hasPrefix("BLAH_IDENTITY: ") { return String(code.dropFirst("BLAH_IDENTITY: ".count)) }
+    if code == "SIGNUP_EMAIL_REQUIRED" { return code }
+    if code.hasPrefix("FLOOD_WAIT") { return nil }
+    if code.hasPrefix("PASSWORD_RECOVERY_EXPIRED") { return nil }
+    if code.hasPrefix("PHONE_CODE_") || code.contains("_MIGRATE_") { return nil }
+    switch code {
+    case "FIRSTNAME_INVALID", "LASTNAME_INVALID", "SESSION_PASSWORD_NEEDED", "PHONE_NUMBER_INVALID",
+        "PHONE_NUMBER_FLOOD", "PHONE_NUMBER_BANNED", "UPDATE_APP_TO_LOGIN", "PHONE_NUMBER_UNOCCUPIED",
+        "EMAIL_CODE_INVALID", "CODE_HASH_EXPIRED", "EMAIL_TOKEN_INVALID", "EMAIL_ADDRESS_INVALID", "PASSWORD_HASH_INVALID":
+        return nil
+    default: break
+    }
+    let message: String
+    switch code {
+    case "IDENTITY_ALREADY_REGISTERED": message = "This identity already has an account on this DC. Go back and sign in again."
+    case "IDENTITY_NOT_REGISTERED": message = "This identity does not have an account on this DC. Create an account first."
+    case "IDENTITY_PROOF_INVALID": message = "The DC could not verify your identity proof."
+    case "IDENTITY_PROFILE_UNAVAILABLE": message = "The DC could not fetch your published profile. Check that your profile server is reachable and serves the profile correctly."
+    case "IDENTITY_PROFILE_INVALID": message = "Your published profile is malformed, invalid or expired. Publish a valid profile, then try again."
+    case "IDENTITY_PROFILE_STALE": message = "Your published profile is older than or conflicts with the profile this DC has accepted. Publish your latest profile, then try again."
+    case "IDENTITY_HOME_INVALID": message = "Your published profile does not have a valid home delegation for this DC. Check your home and publish your latest profile."
+    case "IDENTITY_DEVICE_INVALID": message = "The DC could not verify this device. The profile listing this device may not be published yet. Publish your latest profile, then try again."
+    case "IDENTITY_ACCOUNT_MISMATCH": message = "Your published profile does not name this account yet. Publish your latest profile, then sign in again."
+    case "IDENTITY_PROOF_REQUIRED": message = "The DC requires an identity proof. Unlock your identity and sign in again."
+    case "BLAH_IDENTITY_REQUIRED": message = "This sign-in method requires a Blah identity. Choose an identity to continue."
+    case "IDENTITY_CHALLENGE_INVALID": message = "The identity challenge is invalid or expired. Try signing in again."
+    case "SIGNUP_CLOSED": message = "This DC is not accepting new accounts."
+    case "DEVICE_AUTH_REQUIRED": message = "The DC requires an authorized identity device."
+    case "DEVICE_AUTHORITY_INVALID": message = "This device is no longer authorized by the identity profile."
+    case "PROFILE_UNAVAILABLE": message = "The DC could not reach your profile server. Try again when it is available."
+    case "PROFILE_INVALID": message = "The DC could not verify the published identity profile."
+    case "BLAH_HOME_MIGRATION_REFUSED": message = "The DC requested a different home. Add another account to use a different home."
+    case "INTERNAL_NO_PASSWORD": message = "The DC did not provide the password verification data. Try signing in again."
+    case "KDF_ERROR": message = "The app could not calculate the password proof. Try signing in again."
+    case "INTERNAL": message = "The DC encountered an internal error. Try again later."
+    case "RPC_TIMEOUT": message = "The DC did not respond in time. Try again."
+    default: return "The DC refused the request (\(code))."
+    }
+    return "\(message) (\(code))"
 }
 
 struct BlahDeviceLinkWireResult {
@@ -182,6 +249,14 @@ extension Network {
     }
 
     func blahExportDeviceLink(request: Data?, exceptIds: [Int64]) -> Signal<Api.auth.LoginToken, MTRpcError> {
+        return deferred {
+            let _ = self.blahIdentityError.swap(nil)
+            return self.blahExportDeviceLinkRequest(request: request, exceptIds: exceptIds)
+            |> mapError { self.blahStoreLoginError($0) }
+        }
+    }
+
+    private func blahExportDeviceLinkRequest(request: Data?, exceptIds: [Int64]) -> Signal<Api.auth.LoginToken, MTRpcError> {
         guard self.datacenterId == 1, !self.blahApiHash.isEmpty else {
             return .fail(MTRpcError(errorCode: 400, errorDescription: "BLAH_HOME_MIGRATION_REFUSED"))
         }
@@ -200,9 +275,10 @@ extension Network {
             let user = TelegramUser(user: authorization.user)
             return blahTask {
                 try await BlahIdentityStore.shared.number(slot: self.blahIdentitySlot, account: user.id.id._internalGetInt64Value())
-                return true
-            } |> mapToSignal { _ in
-                self.blahProven(Api.functions.account.getAuthorizations()) |> map { _ in result }
+                return try await BlahIdentityStore.shared.pendingPublication(slot: self.blahIdentitySlot) == nil
+            } |> mapToSignal { published -> Signal<Api.auth.LoginToken, MTRpcError> in
+                guard published else { return .single(result) }
+                return self.blahProven(Api.functions.account.getAuthorizations()) |> map { _ in result }
             }
         }
     }

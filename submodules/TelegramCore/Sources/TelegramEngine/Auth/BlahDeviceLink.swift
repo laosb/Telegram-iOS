@@ -146,7 +146,7 @@ public final class BlahDeviceLinkAttempt {
                 self.state.set(.single(.code(url: "tg://login?token=\(blahLinkBase64(token))&blah=\(link.parameter)", expires: value.expires)))
                 if self.pollRequested { self.poll() }
             case .loginTokenMigrateTo:
-                self.finish(.failed("BLAH_HOME_MIGRATION_REFUSED"))
+                self.finish(.failed(blahDeviceLinkErrorText("BLAH_HOME_MIGRATION_REFUSED")))
             default:
                 self.finish(.failed("DEVICE_LINK_INVALID"))
             }
@@ -201,7 +201,7 @@ public final class BlahDeviceLinkAttempt {
                 guard let self, !self.stopped, self.generation == generation else { return }
                 switch result {
                 case let .loginTokenSuccess(value): self.finish(.signedIn(value.authorization))
-                case .loginTokenMigrateTo: self.finish(.failed("BLAH_HOME_MIGRATION_REFUSED"))
+                case .loginTokenMigrateTo: self.finish(.failed(blahDeviceLinkErrorText("BLAH_HOME_MIGRATION_REFUSED")))
                 default: self.finish(.failed("DEVICE_LINK_INVALID"))
                 }
             }, error: { [weak self] error in
@@ -217,7 +217,12 @@ public final class BlahDeviceLinkAttempt {
 }
 
 private func blahDeviceLinkErrorText(_ error: MTRpcError) -> String {
-    return error.errorDescription.contains("_MIGRATE_") ? "BLAH_HOME_MIGRATION_REFUSED" : error.errorDescription
+    return blahDeviceLinkErrorText(error.errorDescription)
+}
+
+private func blahDeviceLinkErrorText(_ description: String) -> String {
+    let code = description.contains("_MIGRATE_") ? "BLAH_HOME_MIGRATION_REFUSED" : description
+    return blahLoginErrorText(code) ?? code
 }
 
 private func blahLinkBase64(_ data: Data) -> String {

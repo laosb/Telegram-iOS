@@ -36,6 +36,7 @@ import UIKitRuntimeUtils
 import StoreKit
 import PhoneNumberFormat
 import AuthorizationUI
+import BlahIdentityUI
 import ManagedFile
 import DeviceProximity
 import MediaEditor
@@ -1404,6 +1405,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
 
                     self.mainWindow.debugAction = nil
                     self.mainWindow.viewController = context.rootController
+                    presentBlahPendingPublication(context: context.context, from: context.rootController)
                     
                     if firstTime {
                         let layer = context.rootController.view.layer

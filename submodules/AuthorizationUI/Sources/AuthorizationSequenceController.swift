@@ -26,6 +26,11 @@ import AVFoundation
 
 private var ObjCKey_Delegate: Int?
 
+private func authorizationUnknownError(_ fallback: String, info: (Int, String)?) -> String {
+    guard let info else { return fallback }
+    return fallback + " (" + info.1 + ")"
+}
+
 private enum InnerState: Equatable {
     case state(UnauthorizedAccountStateContents)
     case authorized
@@ -290,7 +295,7 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                             AuthorizationSequenceController.presentEmailComposeController(sharedContext: strongSelf.sharedContext, address: "recover@telegram.org", subject: strongSelf.presentationData.strings.Login_PhoneBannedEmailSubject(formattedNumber).string, body: strongSelf.presentationData.strings.Login_PhoneBannedEmailBody(formattedNumber, appVersion, systemVersion, locale, mnc).string, from: controller, presentationData: strongSelf.presentationData)
                                         }))
                                     case let .generic(info):
-                                        text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
+                                        text = strongSelf.account.network.takeBlahIdentityError() ?? authorizationUnknownError(strongSelf.presentationData.strings.Login_UnknownError, info: info)
                                         actions.append(TextAlertAction(type: .genericAction, title: strongSelf.presentationData.strings.Common_OK, action: {}))
                                         actions.append(TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Login_PhoneNumberHelp, action: { [weak controller] in
                                             guard let strongSelf = self, let controller = controller else {
@@ -690,8 +695,8 @@ public final class AuthorizationSequenceController: NavigationController, ASAuth
                                     })]
                                 case .phoneBanned:
                                     text = strongSelf.presentationData.strings.Login_PhoneBannedError
-                                case .generic:
-                                    text = strongSelf.account.network.takeBlahIdentityError() ?? strongSelf.presentationData.strings.Login_UnknownError
+                                case let .generic(info):
+                                    text = strongSelf.account.network.takeBlahIdentityError() ?? authorizationUnknownError(strongSelf.presentationData.strings.Login_UnknownError, info: info)
                                 case .timeout:
                                     text = strongSelf.presentationData.strings.Login_NetworkError
                             }

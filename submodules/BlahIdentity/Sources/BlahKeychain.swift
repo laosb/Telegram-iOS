@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import BlahDiem
 
 // Custody lives outside Postbox, account directories and transport logout.
 @available(iOS 18.0, macOS 15.0, *)
@@ -89,6 +90,7 @@ struct BlahRestoreKeychain {
 public enum BlahIdentityError: Error, LocalizedError {
     case keychain(OSStatus), unavailable, locked, invalidProfile, wrongHome, staleProfile, publicationRequired, duplicate, profileUnavailable
     case profileVerificationFailed, managementRequired
+    case hosting(String)
 
     public var errorDescription: String? {
         switch self {
@@ -98,11 +100,37 @@ public enum BlahIdentityError: Error, LocalizedError {
         case .invalidProfile: return "The identity or DC profile is invalid."
         case .wrongHome: return "This account belongs to another identity or home. Add another account."
         case .staleProfile: return "The profile is older than the saved revision or conflicts with it."
-        case .publicationRequired: return "Publish the latest profile at every listed domain, then sign in again."
+        case .publicationRequired: return "Publish the latest profile at every listed domain, then check publication again."
         case .duplicate: return "This identity is already saved. Unlock its current copy."
         case .profileUnavailable: return "The profile server could not be reached."
         case .profileVerificationFailed: return "This domain serves an identity profile whose signature or validity could not be verified."
         case .managementRequired: return "This device does not hold permission to manage the identity."
+        case let .hosting(message): return message
         }
+    }
+}
+
+/// Describes hosting errors, which do not provide LocalizedError messages in Diem.
+@available(iOS 18.0, macOS 15.0, *)
+public func blahIdentityErrorDescription(_ error: Error) -> String {
+    guard let error = error as? ProfileHostingError else { return error.localizedDescription }
+    switch error {
+    case .cancelled: return "Profile publication was cancelled."
+    case .invalidResponse: return "The profile hosting service returned an invalid response."
+    case let .unexpectedStatus(status): return "The profile hosting service returned HTTP \(status)."
+    case .domainMismatch: return "The profile hosting service does not match the requested domain."
+    case let .unsupportedAlgorithm(algorithm): return "The profile hosting service does not support \(algorithm)."
+    case let .invalidLabel(label): return "The profile hosting name \(label) is invalid."
+    case let .nameTaken(label): return "The profile hosting name \(label) is already taken."
+    case let .unsolvable(label): return "The proof of work required to publish \(label) could not be completed."
+    case let .invalidProof(label): return "The hosting proof for \(label) is invalid."
+    case .noHostedName: return "The profile has no name on this hosting service."
+    case .hostNotListed: return "The hosting service is not listed in the profile."
+    case .tooLarge: return "The profile is too large for the hosting service."
+    case .domainsMismatch: return "The profile domains do not match the hosting request."
+    case .publishedMismatch: return "The hosting service is not serving the exact saved profile."
+    case let .problem(problem):
+        let detail = problem.detail.isEmpty ? problem.title : problem.detail
+        return "The profile hosting service refused publication: \(detail) (HTTP \(problem.status))."
     }
 }

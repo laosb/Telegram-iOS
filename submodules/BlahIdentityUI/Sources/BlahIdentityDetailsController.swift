@@ -1,15 +1,17 @@
 import Foundation
 import UIKit
+import AccountContext
 import BlahDiem
 import BlahIdentity
 import Display
 import ItemListUI
 import SwiftSignalKit
+import TelegramCore
 import TelegramPresentationData
 
-func blahIdentityDetailsController(id: String, presentationData: PresentationData,
+func blahIdentityDetailsController(id: String, sharedContext: SharedAccountContext, presentationData: PresentationData,
     remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) -> ViewController {
-    let coordinator = IdentityDetailsCoordinator(id: id, presentationData: presentationData, remove: remove)
+    let coordinator = IdentityDetailsCoordinator(id: id, sharedContext: sharedContext, presentationData: presentationData, remove: remove)
     let actions = IdentityActions()
     actions.invoke = { [weak coordinator] id, value in coordinator?.invoke(id, value) }
     let signal = coordinator.rows.get() |> map { rows -> (ItemListControllerState, (ItemListNodeState, IdentityActions)) in
@@ -40,6 +42,7 @@ private final class IdentityDetailsCoordinator: NSObject {
     let rows = ValuePromise<[IdentityRow]>([], ignoreRepeated: true)
     weak var controller: ItemListController?
     private let id: String
+    private let sharedContext: SharedAccountContext
     private let slot = "identity-details:" + UUID().uuidString
     private let presentationData: PresentationData
     private let remove: (ViewController, @escaping (Bool) -> Void) -> Void
@@ -54,8 +57,9 @@ private final class IdentityDetailsCoordinator: NSObject {
     private var contentRows: [IdentityRow] = []
     private var strings: PresentationStrings { presentationData.strings }
 
-    init(id: String, presentationData: PresentationData, remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) {
+    init(id: String, sharedContext: SharedAccountContext, presentationData: PresentationData, remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) {
         self.id = id
+        self.sharedContext = sharedContext
         self.presentationData = presentationData
         self.remove = remove
         super.init()
@@ -121,8 +125,8 @@ private final class IdentityDetailsCoordinator: NSObject {
             for domain in identity.user.domains {
                 row("https://\(domain.name)/.well-known/blah/profile.cbor", section: 1, text: true)
             }
+            row(identity.publicationPending ? strings.blah_Identity_PublicationPending : strings.blah_Identity_Published, section: 1, text: true)
             if identity.hostingDomain != nil {
-                row(identity.publicationPending ? strings.blah_Identity_PublicationPending : strings.blah_Identity_Published, section: 1, text: true)
                 row(strings.blah_Identity_Publish, section: 1) { [weak self] _ in self?.publishProfile() }
             }
             row(strings.blah_Identity_ExportProfile, section: 1) { [weak self] _ in
@@ -136,7 +140,9 @@ private final class IdentityDetailsCoordinator: NSObject {
                 self.update {
                     try await BlahIdentityStore.shared.checkPublication(slot: self.slot)
                     try Task.checkCancellation()
-                    await MainActor.run { if !Task.isCancelled { self.show(self.strings.blah_Identity_Published) } }
+                    if try await self.refreshPublication() {
+                        await MainActor.run { if !Task.isCancelled { self.show(self.strings.blah_Identity_Published) } }
+                    }
                     return try await BlahIdentityStore.shared.inspect(slot: self.slot)
                 }
             }
@@ -310,9 +316,34 @@ private final class IdentityDetailsCoordinator: NSObject {
     private func publishProfile() {
         update { [self] in
             try await BlahIdentityStore.shared.publish(slot: slot)
+            _ = try await refreshPublication()
             return try await BlahIdentityStore.shared.inspect(slot: slot)
         }
     }
+    @MainActor private func refreshPublication() async throws -> Bool {
+        let accounts = await (sharedContext.activeAccountContexts |> take(1)).get()
+        for (_, context, _) in accounts.accounts {
+            let network = context.account.network
+            guard try await BlahIdentityStore.shared.boundIdentityID(slot: network.blahIdentitySlot) == id else { continue }
+            let pending: BlahPendingPublication?
+            do {
+                pending = try await refreshIdentityPublication(network: network, id: id, allowUnlock: true)
+            } catch {
+                throw IdentityPublicationFailure(message: strings.blah_IdentityWizard_RefreshFailed(error.localizedDescription).string)
+            }
+            try Task.checkCancellation()
+            if let pending, let controller {
+                let overlay = identityPublicationController(network: network, sharedContext: sharedContext,
+                    presentationData: presentationData, pending: pending)
+                (controller.navigationController as? NavigationController)?.presentOverlay(controller: overlay)
+                return false
+            }
+            return true
+        }
+        // Pre-login details have no authorized network; activation will pick up the obligation.
+        return true
+    }
+
     private func change(_ change: BlahIdentityStore.Change) {
         update { [self] in try await BlahIdentityStore.shared.change(slot: slot, change: change) }
     }
