@@ -34,6 +34,9 @@ public func presentBlahPendingPublication(context: AccountContext, from controll
         }
         _ = identityBackgroundLock
         do {
+            // Retry best-effort numbering if the login attempt failed to save it.
+            // A locked identity must not prevent publication of an already saved revision.
+            try? await BlahIdentityStore.shared.number(slot: slot, account: context.account.peerId.id._internalGetInt64Value())
             guard var pending = try await BlahIdentityStore.shared.pendingPublication(slot: slot) else {
                 if let id = try await BlahIdentityStore.shared.refreshPending(slot: slot) {
                     _ = try? await refreshIdentityPublication(network: network, id: id, allowUnlock: false)

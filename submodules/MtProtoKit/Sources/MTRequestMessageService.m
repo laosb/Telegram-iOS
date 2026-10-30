@@ -984,6 +984,10 @@
                                 
                                 authInfo = [authInfo withUpdatedAuthKeyAttributes:authKeyAttributes];
                                 [_context updateAuthInfoForDatacenterWithId:mtProto.datacenterId authInfo:authInfo selector:authInfoSelector];
+                                // TCP does not ask for a transaction after receiving a response. This
+                                // restart has no errorContext timer, and an attributes-only auth-info
+                                // update does not wake MTProto. Retry after the hash has been cleared.
+                                [mtProto requestTransportTransaction];
                             }];
                             
                             restartRequest = true;

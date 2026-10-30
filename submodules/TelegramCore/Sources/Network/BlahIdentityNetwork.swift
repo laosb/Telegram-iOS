@@ -109,11 +109,8 @@ extension Network {
             guard let authorization, case let .authorization(value) = authorization else { return .single(result) }
             let user = TelegramUser(user: value.user)
             return blahTask {
-                try await BlahIdentityStore.shared.number(slot: self.blahIdentitySlot, account: user.id.id._internalGetInt64Value())
-                return try await BlahIdentityStore.shared.pendingPublication(slot: self.blahIdentitySlot) == nil
-            } |> mapToSignal { published -> Signal<T, MTRpcError> in
-                guard published else { return .single(result) }
-                return self.blahProven(Api.functions.account.getAuthorizations()) |> map { _ in result }
+                try? await BlahIdentityStore.shared.number(slot: self.blahIdentitySlot, account: user.id.id._internalGetInt64Value())
+                return result
             }
         }
     }
@@ -142,15 +139,26 @@ extension Network {
             }
             return self.blahRawRequest((description, buffer, parse), automaticFloodWait: false)
         } |> mapToSignal { challenge in
-            return blahTask { () -> Data in
+            return blahTask { () -> Data? in
+                let issued = try InvocationChallenge(encoding: Array(challenge.0))
                 let binding = await self.blahBinding()
-                guard binding.0 != 0, binding.1 != 0 else { throw BlahIdentityError.invalidProfile }
-                let proof = try await BlahIdentityStore.shared.prove(slot: self.blahIdentitySlot,
-                    challenge: challenge.0, expires: challenge.1, query: data.1.makeData(), keyID: binding.0, sessionID: binding.1, expectedProfile: expectedProfile)
+                guard binding.0 != 0, binding.1 != 0,
+                    issued.transportKeyID == binding.0, issued.sessionID == UInt64(bitPattern: binding.1) else { return nil }
+                let proof: Data
+                do {
+                    proof = try await BlahIdentityStore.shared.prove(slot: self.blahIdentitySlot,
+                        challenge: challenge.0, expires: challenge.1, query: data.1.makeData(), keyID: binding.0, sessionID: binding.1, expectedProfile: expectedProfile)
+                } catch {
+                    let current = await self.blahBinding()
+                    if binding != current { return nil }
+                    throw error
+                }
                 let current = await self.blahBinding()
-                guard binding == current else { throw BlahIdentityError.invalidProfile }
-                return proof
+                return binding == current ? proof : nil
             } |> mapToSignal { proof -> Signal<T, MTRpcError> in
+                guard let proof else {
+                    return .fail(MTRpcError(errorCode: 400, errorDescription: "BLAH_IDENTITY_BINDING_CHANGED"))
+                }
                 let buffer = Buffer()
                 buffer.appendInt32(Int32(bitPattern: 0xfb8f651a)) // blah.invokeWithLayer
                 buffer.appendInt32(1)
@@ -195,6 +203,8 @@ func blahLoginErrorText(_ code: String) -> String? {
     case "IDENTITY_ALREADY_REGISTERED": message = "This identity already has an account on this DC. Go back and sign in again."
     case "IDENTITY_NOT_REGISTERED": message = "This identity does not have an account on this DC. Create an account first."
     case "IDENTITY_PROOF_INVALID": message = "The DC could not verify your identity proof."
+    case "SESSION_ALREADY_AUTHORIZED": message = "This connection is already signed in. Go back and sign in again; if it keeps failing, remove this account from the app and add it again."
+    case "BLAH_IDENTITY_BINDING_CHANGED": message = "The connection changed while verifying your identity. Try signing in again."
     case "IDENTITY_PROFILE_UNAVAILABLE": message = "The DC could not fetch your published profile. Check that your profile server is reachable and serves the profile correctly."
     case "IDENTITY_PROFILE_INVALID": message = "Your published profile is malformed, invalid or expired. Publish a valid profile, then try again."
     case "IDENTITY_PROFILE_STALE": message = "Your published profile is older than or conflicts with the profile this DC has accepted. Publish your latest profile, then try again."
@@ -275,11 +285,8 @@ extension Network {
                 case let .authorization(authorization) = success.authorization else { return .single(result) }
             let user = TelegramUser(user: authorization.user)
             return blahTask {
-                try await BlahIdentityStore.shared.number(slot: self.blahIdentitySlot, account: user.id.id._internalGetInt64Value())
-                return try await BlahIdentityStore.shared.pendingPublication(slot: self.blahIdentitySlot) == nil
-            } |> mapToSignal { published -> Signal<Api.auth.LoginToken, MTRpcError> in
-                guard published else { return .single(result) }
-                return self.blahProven(Api.functions.account.getAuthorizations()) |> map { _ in result }
+                try? await BlahIdentityStore.shared.number(slot: self.blahIdentitySlot, account: user.id.id._internalGetInt64Value())
+                return result
             }
         }
     }
