@@ -21,8 +21,9 @@ extension Network {
             let _ = self.blahIdentityError.swap(nil)
             let message = Atomic<String?>(value: nil)
             return operation { error in
-                let _ = message.swap(blahLoginErrorText(error.errorDescription)
-                    ?? "The DC refused the request (\(error.errorDescription)).")
+                let description: String = error.errorDescription
+                let _ = message.swap(blahLoginErrorText(description)
+                    ?? "The DC refused the request (\(description)).")
                 return genericError
             }
             |> mapError { error in
@@ -118,7 +119,7 @@ extension Network {
     }
 
     private func blahStoreLoginError(_ error: MTRpcError) -> MTRpcError {
-        let error = error.errorDescription.contains("_MIGRATE_")
+        let error: MTRpcError = error.errorDescription.contains("_MIGRATE_")
             ? MTRpcError(errorCode: 400, errorDescription: "BLAH_HOME_MIGRATION_REFUSED") : error
         let _ = self.blahIdentityError.swap(blahLoginErrorText(error.errorDescription))
         return error
