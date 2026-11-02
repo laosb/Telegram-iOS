@@ -11,6 +11,8 @@ swift_library(
         "//submodules/ItemListUI", "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/AsyncDisplayKit", "//submodules/AccountContext",
         "//submodules/SolidRoundedButtonNode", "//submodules/PresentationDataUtils",
+        "//submodules/TelegramUI/Components/Wallet/WalletWordsScreen",
+        "//submodules/TelegramUI/Components/Wallet/WalletImportScreen",
         "//submodules/QrCode", "//submodules/QrCodeUI",
     ],
     visibility = ["//visibility:public"],

@@ -2,6 +2,7 @@ import Foundation
 import Postbox
 internal import TelegramApi
 import SwiftSignalKit
+import MtProtoKit
 
 func requestRecentAccountSessions(account: Account) -> Signal<([RecentAccountSession], Int32), NoError> {
     return account.network.request(Api.functions.account.getAuthorizations())
@@ -29,30 +30,31 @@ public enum TerminateSessionError {
     case freshReset
 }
 
-func terminateAccountSession(account: Account, hash: Int64) -> Signal<Void, TerminateSessionError> {
-    return account.network.request(Api.functions.account.resetAuthorization(hash: hash))
-    |> mapError { error -> TerminateSessionError in
-        if error.errorCode == 406 {
-            return .freshReset
+private func resetBlahSession<T>(account: Account, hash: Int64?, reset: @escaping () -> Signal<T, MTRpcError>) -> Signal<Void, TerminateSessionError> {
+    return account.network.blahPrepareSessionTermination(hash: hash)
+    |> mapToSignal { _ in
+        reset() |> `catch` { error -> Signal<T, MTRpcError> in
+            guard error.errorDescription == "DEVICE_STILL_LISTED" else { return .fail(error) }
+            return (.single(()) |> delay(0.5, queue: Queue.concurrentDefaultQueue()))
+            |> mapToSignal { reset() }
         }
-        return .generic
     }
-    |> mapToSignal { _ -> Signal<Void, TerminateSessionError> in
-        return .single(Void())
+    |> mapError { error -> TerminateSessionError in
+        return error.errorCode == 406 ? .freshReset : .generic
     }
+    |> map { _ in () }
+}
+
+func terminateAccountSession(account: Account, hash: Int64) -> Signal<Void, TerminateSessionError> {
+    return resetBlahSession(account: account, hash: hash, reset: {
+        account.network.request(Api.functions.account.resetAuthorization(hash: hash))
+    })
 }
 
 func terminateOtherAccountSessions(account: Account) -> Signal<Void, TerminateSessionError> {
-    return account.network.request(Api.functions.auth.resetAuthorizations())
-    |> mapError { error -> TerminateSessionError in
-        if error.errorCode == 406 {
-            return .freshReset
-        }
-        return .generic
-    }
-    |> mapToSignal { _ -> Signal<Void, TerminateSessionError> in
-        return .single(Void())
-    }
+    return resetBlahSession(account: account, hash: nil, reset: {
+        account.network.request(Api.functions.auth.resetAuthorizations())
+    })
 }
 
 public enum UpadteAuthorizationTTLError {

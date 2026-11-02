@@ -1,5 +1,8 @@
 import Foundation
 import UIKit
+import LocalAuthentication
+import WalletWordsScreen
+import WalletImportScreen
 import AccountContext
 import BlahDiem
 import BlahIdentity
@@ -9,9 +12,8 @@ import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
 
-func blahIdentityDetailsController(id: String, sharedContext: SharedAccountContext, presentationData: PresentationData,
-    remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) -> ViewController {
-    let coordinator = IdentityDetailsCoordinator(id: id, sharedContext: sharedContext, presentationData: presentationData, remove: remove)
+func blahIdentityDetailsController(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData) -> ViewController {
+    let coordinator = IdentityDetailsCoordinator(network: network, sharedContext: sharedContext, presentationData: presentationData)
     let actions = IdentityActions()
     actions.invoke = { [weak coordinator] id, value in coordinator?.invoke(id, value) }
     let signal = coordinator.rows.get() |> map { rows -> (ItemListControllerState, (ItemListNodeState, IdentityActions)) in
@@ -41,11 +43,10 @@ func blahIdentityDetailsController(id: String, sharedContext: SharedAccountConte
 private final class IdentityDetailsCoordinator: NSObject {
     let rows = ValuePromise<[IdentityRow]>([], ignoreRepeated: true)
     weak var controller: ItemListController?
-    private let id: String
+    private let network: Network
+    private var slot: String { network.blahIdentitySlot }
     private let sharedContext: SharedAccountContext
-    private let slot = "identity-details:" + UUID().uuidString
     private let presentationData: PresentationData
-    private let remove: (ViewController, @escaping (Bool) -> Void) -> Void
     private var identity: BlahIdentityView?
     private var actions: [Int32: (Bool?) -> Void] = [:]
     private var isBusy = false
@@ -57,11 +58,10 @@ private final class IdentityDetailsCoordinator: NSObject {
     private var contentRows: [IdentityRow] = []
     private var strings: PresentationStrings { presentationData.strings }
 
-    init(id: String, sharedContext: SharedAccountContext, presentationData: PresentationData, remove: @escaping (ViewController, @escaping (Bool) -> Void) -> Void) {
-        self.id = id
+    init(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData) {
+        self.network = network
         self.sharedContext = sharedContext
         self.presentationData = presentationData
-        self.remove = remove
         super.init()
         observer = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main) { [weak self] _ in
@@ -73,7 +73,6 @@ private final class IdentityDetailsCoordinator: NSObject {
         task?.cancel()
         if let observer { NotificationCenter.default.removeObserver(observer) }
         if let shareURL { try? FileManager.default.removeItem(at: shareURL.deletingLastPathComponent()) }
-        Task { await BlahIdentityStore.shared.lock() }
     }
 
     func lockWhenLeaving() {
@@ -81,7 +80,6 @@ private final class IdentityDetailsCoordinator: NSObject {
     }
     func cancel() {
         stopWork()
-        Task { await BlahIdentityStore.shared.lock() }
     }
     private func stopWork() {
         generation += 1
@@ -99,7 +97,7 @@ private final class IdentityDetailsCoordinator: NSObject {
     func reload() {
         update { [self] in
             if let current = try? await BlahIdentityStore.shared.inspect(slot: slot) { return current }
-            return try await BlahIdentityStore.shared.unlock(id: id, slot: slot)
+            return try await BlahIdentityStore.shared.unlock(slot: slot)
         }
     }
 
@@ -133,7 +131,7 @@ private final class IdentityDetailsCoordinator: NSObject {
                 self?.share(Data(identity.profile.encoding), filename: "profile.cbor")
             }
             if identity.canManageIdentity {
-                row(strings.blah_Identity_ExportBackup, section: 1) { [weak self] _ in self?.exportBackup() }
+                row(strings.blah_Identity_RecoveryWords, section: 1) { [weak self] _ in self?.showRecoveryWords() }
             }
             row(strings.blah_Identity_CheckPublication, section: 1) { [weak self] _ in
                 guard let self else { return }
@@ -160,13 +158,13 @@ private final class IdentityDetailsCoordinator: NSObject {
                     self?.change(.renewal(profileDays: identity.profileDays, deviceDays: identity.deviceDays, automatic: $0 ?? false))
                 }
                 row("\(strings.blah_Identity_ProfileDays): \(identity.profileDays)", section: 3) { [weak self] _ in
-                    self?.prompt(title: self?.strings.blah_Identity_ProfileDays ?? "", secure: false) { [weak self] value in
+                    self?.prompt(title: self?.strings.blah_Identity_ProfileDays ?? "") { [weak self] value in
                         if let days = UInt64(value) { self?.change(.renewal(profileDays: days, deviceDays: identity.deviceDays, automatic: identity.autoRenew)) }
                         else { self?.show(self?.strings.blah_Identity_InvalidValidity ?? "") }
                     }
                 }
                 row("\(strings.blah_Identity_DeviceDays): \(identity.deviceDays)", section: 3) { [weak self] _ in
-                    self?.prompt(title: self?.strings.blah_Identity_DeviceDays ?? "", secure: false) { [weak self] value in
+                    self?.prompt(title: self?.strings.blah_Identity_DeviceDays ?? "") { [weak self] value in
                         if let days = UInt64(value) { self?.change(.renewal(profileDays: identity.profileDays, deviceDays: days, automatic: identity.autoRenew)) }
                         else { self?.show(self?.strings.blah_Identity_InvalidValidity ?? "") }
                     }
@@ -185,7 +183,7 @@ private final class IdentityDetailsCoordinator: NSObject {
             row(strings.blah_Identity_UsernameNotice, section: 4, text: true)
             if identity.canManageIdentity, case .user = identity.profile {
                 row(strings.blah_Identity_AddDomain, section: 4) { [weak self] _ in
-                    self?.prompt(title: self?.strings.blah_Identity_AddDomain ?? "", secure: false) { [weak self] value in
+                    self?.prompt(title: self?.strings.blah_Identity_AddDomain ?? "") { [weak self] value in
                         do {
                             let domain = try DomainName(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
                             self?.change(.domains(identity.user.domains + [domain]))
@@ -193,45 +191,20 @@ private final class IdentityDetailsCoordinator: NSObject {
                     }
                 }
             }
-            row(strings.blah_Identity_DevicesSection, section: 5, header: true)
-            for certificate in identity.profile.devices {
-                let current = certificate.device == identity.device
-                row("\(current ? strings.blah_Identity_ThisDevice : identity.canManageIdentity ? strings.blah_Identity_RevokeDevice : strings.blah_IdentityWizard_Device)\n\(certificate.device.id.description)",
-                    section: 5, text: current || !identity.canManageIdentity, destructive: !current) { [weak self] _ in
-                    self?.confirm(self?.strings.blah_Identity_RevokeNotice ?? "") { self?.change(.removeDevice(certificate.device.id)) }
-                }
-            }
-            row(strings.blah_Identity_CopyDevice, section: 5) { [weak self] _ in
-                UIPasteboard.general.string = Data(identity.device.key.encoding).base64EncodedString()
-                self?.message = self?.strings.blah_Identity_Copied
-                self?.publishRows()
-            }
             if identity.canManageIdentity {
-                row(strings.blah_Identity_AddDevice, section: 5) { [weak self] _ in
-                    self?.prompt(title: self?.strings.blah_Identity_AddDevice ?? "", secure: false) { [weak self] value in
-                        guard let data = Data(base64Encoded: value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-                            self?.show(self?.strings.blah_Identity_InvalidDevice ?? ""); return
-                        }
-                        self?.change(.addDevice(data))
+                row(strings.blah_Identity_RemoveWords, section: 5, destructive: true) { [weak self] _ in
+                    guard let self else { return }
+                    self.confirm(self.strings.blah_Identity_RemoveWordsNotice) { [weak self] in
+                        guard let self else { return }
+                        self.update { [self] in try await BlahIdentityStore.shared.removeRecoveryWords(slot: slot) }
                     }
                 }
+            } else {
+                row(strings.blah_Identity_HolderNotice, section: 5, text: true)
+                row(strings.blah_Identity_EnterWords, section: 5) { [weak self] _ in self?.enterWords() }
             }
-            row(strings.blah_Identity_Lock, section: 6) { [weak self] _ in self?.clearIdentity(); Task { await BlahIdentityStore.shared.lock() }; self?.refresh() }
         } else {
             row(strings.blah_IdentityWizard_Unlock) { [weak self] _ in self?.reload() }
-        }
-        row(strings.blah_Identity_Remove, section: 7, destructive: true) { [weak self] _ in
-            guard let self, let controller = self.controller else { return }
-            self.cancel()
-            self.isBusy = true
-            self.publishRows()
-            let generation = self.generation
-            self.remove(controller, { [weak self] removed in
-                guard let self, self.generation == generation else { return }
-                self.isBusy = false
-                self.publishRows()
-                if removed { self.controller?.dismiss() }
-            })
         }
         contentRows = entries
         publishRows()
@@ -321,42 +294,42 @@ private final class IdentityDetailsCoordinator: NSObject {
         }
     }
     @MainActor private func refreshPublication() async throws -> Bool {
-        let accounts = await (sharedContext.activeAccountContexts |> take(1)).get()
-        for (_, context, _) in accounts.accounts {
-            let network = context.account.network
-            guard try await BlahIdentityStore.shared.boundIdentityID(slot: network.blahIdentitySlot) == id else { continue }
-            let pending: BlahPendingPublication?
-            do {
-                pending = try await refreshIdentityPublication(network: network, id: id, allowUnlock: true)
-            } catch {
-                throw IdentityPublicationFailure(message: strings.blah_IdentityWizard_RefreshFailed(error.localizedDescription).string)
-            }
-            try Task.checkCancellation()
-            if let pending, let controller {
-                let overlay = identityPublicationController(network: network, sharedContext: sharedContext,
-                    presentationData: presentationData, pending: pending)
-                (controller.navigationController as? NavigationController)?.presentOverlay(controller: overlay)
-                return false
-            }
-            return true
+        guard let id = identity?.id else { return true }
+        if let pending = try await refreshIdentityPublication(network: network, id: id, allowUnlock: true), let controller {
+            let overlay = identityPublicationController(network: network, sharedContext: sharedContext,
+                presentationData: presentationData, pending: pending)
+            (controller.navigationController as? NavigationController)?.presentOverlay(controller: overlay)
+            return false
         }
-        // Pre-login details have no authorized network; activation will pick up the obligation.
         return true
     }
 
     private func change(_ change: BlahIdentityStore.Change) {
         update { [self] in try await BlahIdentityStore.shared.change(slot: slot, change: change) }
     }
-    private func exportBackup() {
-        prompt(title: strings.blah_Identity_BackupPassword, secure: true) { [weak self] password in
-            guard let self else { return }
-            self.run {
-                let data = try await BlahIdentityStore.shared.exportRecovery(slot: self.slot, password: password)
-                try Task.checkCancellation()
-                await MainActor.run { if !Task.isCancelled { self.share(data, filename: "identity.cbor") } }
+    private func showRecoveryWords() {
+        run { [self] in
+            let auth = LAContext()
+            let allowed = try await auth.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: strings.blah_Identity_AuthenticateWords)
+            guard allowed else { return }
+            let words = try await BlahIdentityStore.shared.recoveryWords(slot: slot)
+            try Task.checkCancellation()
+            await MainActor.run {
+                let screen = WalletWordsScreen(sharedContext: self.sharedContext, words: words)
+                (self.controller?.navigationController as? NavigationController)?.pushViewController(screen)
             }
         }
     }
+
+    private func enterWords() {
+        let input = WalletRecoveryWordsInput(validate: { (try? IdentitySeed(phrase: $0.joined(separator: " "))) != nil }, completed: { [weak self] words in
+            guard let self else { return }
+            _ = (self.controller?.navigationController as? NavigationController)?.popViewController(animated: false)
+            self.update { [self] in try await BlahIdentityStore.shared.enterRecoveryWords(words, slot: slot) }
+        })
+        (controller?.navigationController as? NavigationController)?.pushViewController(WalletImportScreen(sharedContext: sharedContext, recovery: input))
+    }
+
     private func share(_ data: Data, filename: String) {
         do {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -371,11 +344,11 @@ private final class IdentityDetailsCoordinator: NSObject {
             controller?.present(share, animated: true)
         } catch { show(error.localizedDescription) }
     }
-    private func prompt(title: String, secure: Bool, value: String = "", keyboard: UIKeyboardType = .default,
+    private func prompt(title: String, value: String = "", keyboard: UIKeyboardType = .default,
         message: String? = nil, complete: @escaping (String) -> Void) {
-        let alert = UIAlertController(title: title, message: message ?? (secure ? strings.blah_Identity_BackupNotice : nil), preferredStyle: .alert)
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addTextField { field in
-            field.isSecureTextEntry = secure; field.autocapitalizationType = .none; field.autocorrectionType = .no
+            field.autocapitalizationType = .none; field.autocorrectionType = .no
             field.text = value
             field.keyboardType = keyboard
             field.accessibilityLabel = title

@@ -15,6 +15,7 @@ import LottieComponent
 import ButtonComponent
 import SegmentControlComponent
 import WalletContext
+import WalletEngineFFI
 import SwiftSignalKit
 import WalletAuthorizationUI
 import AlertComponent
@@ -86,34 +87,59 @@ private func parseWalletPastedWords(_ text: String) -> [String] {
     return words.map { $0.word }
 }
 
+private struct WalletImportWallet {
+    let context: AccountContext
+    let walletContext: WalletContext
+    let mode: WalletImportScreenMode
+    let completion: (() -> Void)?
+}
+
 private final class WalletImportScreenComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
 
-    let context: AccountContext
-    let walletContext: WalletContext
+    let wallet: WalletImportWallet?
+    let sharedContext: SharedAccountContext
+    let recovery: WalletRecoveryWordsInput?
     let mode: WalletImportScreenMode
     let verificationIndices: [Int]
     let completion: (() -> Void)?
 
     init(
-        context: AccountContext,
-        walletContext: WalletContext,
+        wallet: WalletImportWallet?,
+        sharedContext: SharedAccountContext,
+        recovery: WalletRecoveryWordsInput? = nil,
         mode: WalletImportScreenMode,
         verificationIndices: [Int],
         completion: (() -> Void)?
     ) {
-        self.context = context
-        self.walletContext = walletContext
+        self.wallet = wallet
+        self.sharedContext = sharedContext
+        self.recovery = recovery
         self.mode = mode
         self.verificationIndices = verificationIndices
         self.completion = completion
     }
 
     static func ==(lhs: WalletImportScreenComponent, rhs: WalletImportScreenComponent) -> Bool {
-        return lhs.context === rhs.context
-            && lhs.walletContext === rhs.walletContext
+        return lhs.wallet?.context === rhs.wallet?.context
+            && lhs.sharedContext === rhs.sharedContext
+            && lhs.recovery === rhs.recovery
+            && lhs.wallet?.walletContext === rhs.wallet?.walletContext
             && lhs.mode == rhs.mode
             && lhs.verificationIndices == rhs.verificationIndices
+    }
+
+    func isMnemonicWord(_ word: String) -> Bool {
+        return recovery != nil ? mnemonicWordlist().contains(word) : wallet?.walletContext.isMnemonicWord(word) ?? false
+    }
+
+    func isMnemonicValid(words: [String]) -> Bool {
+        return recovery?.validate(words) ?? wallet?.walletContext.isMnemonicValid(words: words) ?? false
+    }
+
+    func mnemonicWordSuggestions(for word: String, limit: Int) -> [String] {
+        return recovery != nil ? Array(mnemonicWordlist().lazy.filter { $0.hasPrefix(word) }.prefix(limit))
+            : wallet?.walletContext.mnemonicWordSuggestions(for: word, limit: limit) ?? []
     }
 
     private final class ScrollView: UIScrollView {
@@ -583,7 +609,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func setWordCount(_ count: Int) {
-            guard (count == 12 || count == 24), count != self.words.count else {
+            guard (count == 24 || (self.component?.recovery == nil && count == 12)), count != self.words.count else {
                 return
             }
             self.setupWordInputFields(
@@ -601,7 +627,7 @@ private final class WalletImportScreenComponent: Component {
         deinit {
             self.flowSession?.invalidate()
             if let prepared = self.activePreparedRecoveryPhraseImport,
-               let walletContext = self.component?.walletContext {
+               let walletContext = self.component?.wallet?.walletContext {
                 let _ = walletContext.discardRecoveryPhraseImport(prepared).start()
             }
             NotificationCenter.default.removeObserver(self)
@@ -621,7 +647,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func walletFlowAuthorization() -> Signal<PasscodeSession, WalletContext.WalletError> {
-            guard let component = self.component else { return .fail(.authorizationCancelled) }
+            guard let component = self.component?.wallet else { return .fail(.authorizationCancelled) }
             if let session = self.flowSession, session.isValid {
                 return .single(session)
             }
@@ -671,7 +697,7 @@ private final class WalletImportScreenComponent: Component {
             switch component.mode {
             case .importWallet, .enterRecoveryPhrase, .enableBackup:
                 return self.words.allSatisfy { word in
-                    return !word.isEmpty && component.walletContext.isMnemonicWord(word)
+                    return !word.isEmpty && component.isMnemonicWord(word)
                 }
             case .verify:
                 return self.words.allSatisfy { !$0.isEmpty }
@@ -699,7 +725,7 @@ private final class WalletImportScreenComponent: Component {
                 self.isImportPhraseValid = false
                 return
             }
-            self.isImportPhraseValid = component.walletContext.isMnemonicValid(words: self.words)
+            self.isImportPhraseValid = component.isMnemonicValid(words: self.words)
         }
 
         private func updateWordSuggestions() {
@@ -712,11 +738,8 @@ private final class WalletImportScreenComponent: Component {
                 return
             }
             let word = self.words[activeWordIndex]
-            let suggestions = component.walletContext.mnemonicWordSuggestions(
-                for: word,
-                limit: 3
-            )
-            if suggestions.isEmpty && !component.walletContext.isMnemonicWord(word) {
+            let suggestions = component.mnemonicWordSuggestions(for: word, limit: 3)
+            if suggestions.isEmpty && !component.isMnemonicWord(word) {
                 self.wordSuggestions = []
                 self.hasInvalidWordSuggestion = true
             } else if suggestions.count == 1, suggestions[0] == word {
@@ -734,7 +757,7 @@ private final class WalletImportScreenComponent: Component {
                 return false
             }
             let word = self.words[index]
-            return !word.isEmpty && !component.walletContext.isMnemonicWord(word)
+            return !word.isEmpty && !component.isMnemonicWord(word)
         }
 
         private func rejectInvalidWord(at index: Int) {
@@ -904,7 +927,7 @@ private final class WalletImportScreenComponent: Component {
                 insertedWords = Array(normalizedWords.prefix(self.words.count - index))
             } else {
                 if normalizedWords.count > 1 {
-                    guard normalizedWords.count == 12 || normalizedWords.count == 24 else {
+                    guard normalizedWords.count == 24 || (self.component?.recovery == nil && normalizedWords.count == 12) else {
                         self.presentInvalidPhraseLength(count: normalizedWords.count)
                         return true
                     }
@@ -964,11 +987,11 @@ private final class WalletImportScreenComponent: Component {
             guard !words.isEmpty else {
                 return
             }
-            guard words.count == 12 || words.count == 24 else {
+            guard words.count == 24 || (component.recovery == nil && words.count == 12) else {
                 self.presentInvalidPhraseLength(count: words.count)
                 return
             }
-            guard component.walletContext.isMnemonicValid(words: words) else {
+            guard component.isMnemonicValid(words: words) else {
                 self.presentInvalidMnemonic()
                 return
             }
@@ -992,11 +1015,11 @@ private final class WalletImportScreenComponent: Component {
             if let activeWordIndex, self.wordFields.indices.contains(activeWordIndex) {
                 self.wordFields[activeWordIndex].layer.addShakeAnimation()
             }
-            let strings = component.context.sharedContext.currentPresentationData.with { $0 }.strings
+            let strings = component.sharedContext.currentPresentationData.with { $0 }.strings
             controller.present(textAlertController(
-                context: component.context,
-                title: strings.Wallet_Import_InvalidPhraseTitle,
-                text: self.isBackupEnableMode
+                sharedContext: component.sharedContext,
+                title: component.recovery != nil ? strings.blah_Identity_RecoveryWords : strings.Wallet_Import_InvalidPhraseTitle,
+                text: component.recovery != nil ? strings.blah_Identity_InvalidWords : self.isBackupEnableMode
                     ? strings.Wallet_Import_InvalidCurrentPhraseLength(String(count)).string
                     : strings.Wallet_Import_InvalidPhraseLength(String(count)).string,
                 actions: [TextAlertAction(type: .defaultAction, title: strings.Common_OK, action: {
@@ -1008,12 +1031,12 @@ private final class WalletImportScreenComponent: Component {
             guard let component = self.component, let controller = self.environment?.controller() else {
                 return
             }
-            let strings = component.context.sharedContext.currentPresentationData.with { $0 }.strings
+            let strings = component.sharedContext.currentPresentationData.with { $0 }.strings
             HapticFeedback().error()
             controller.present(textAlertController(
-                context: component.context,
-                title: strings.Wallet_Import_InvalidPhraseTitle,
-                text: strings.Wallet_Import_InvalidPhraseText,
+                sharedContext: component.sharedContext,
+                title: component.recovery != nil ? strings.blah_Identity_RecoveryWords : strings.Wallet_Import_InvalidPhraseTitle,
+                text: component.recovery != nil ? strings.blah_Identity_InvalidWords : strings.Wallet_Import_InvalidPhraseText,
                 actions: [TextAlertAction(type: .defaultAction, title: strings.Common_OK, action: {
                 })]
             ), in: .window(.root))
@@ -1091,6 +1114,11 @@ private final class WalletImportScreenComponent: Component {
             guard let component = self.component else {
                 return
             }
+            if let recovery = component.recovery {
+                recovery.completed(words)
+                return
+            }
+            guard let component = component.wallet else { return }
             if case let .enableBackup(expectedAddress) = component.mode {
                 self.enableBackup(words: words, expectedAddress: expectedAddress)
                 return
@@ -1134,7 +1162,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func prepareRecoveryPhraseImport(words: [String]) {
-            guard let component = self.component else {
+            guard let component = self.component?.wallet else {
                 return
             }
             self.isImporting = true
@@ -1167,7 +1195,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func enableBackup(words: [String], expectedAddress: String) {
-            guard let component = self.component, !self.isImporting else { return }
+            guard let component = self.component?.wallet, !self.isImporting else { return }
             self.isImporting = true
             self.endEditing(true)
             self.componentState?.updated(transition: .easeInOut(duration: 0.2))
@@ -1191,7 +1219,7 @@ private final class WalletImportScreenComponent: Component {
             self.endWalletFlow()
             self.componentState?.updated(transition: .easeInOut(duration: 0.2))
             guard error != .authorizationCancelled,
-                  let component = self.component, let controller = self.environment?.controller() else { return }
+                  let component = self.component?.wallet, let controller = self.environment?.controller() else { return }
             let strings = component.context.sharedContext.currentPresentationData.with { $0 }.strings
             let message = walletBackupEnableErrorMessage(error, strings: strings)
             var actions = [TextAlertAction(type: .genericAction, title: strings.Common_Cancel, action: {})]
@@ -1261,7 +1289,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func presentRecoveryPhraseExplanation() {
-            guard let component = self.component, component.mode == .enterRecoveryPhrase else {
+            guard let component = self.component?.wallet, component.mode == .enterRecoveryPhrase else {
                 return
             }
             let strings = component.context.sharedContext.currentPresentationData.with { $0 }.strings
@@ -1278,7 +1306,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func presentWrongSecretPhrase() {
-            guard let component = self.component,
+            guard let component = self.component?.wallet,
                   case let .wallet(info) = component.walletContext.stateValue.phase else {
                 return
             }
@@ -1331,7 +1359,7 @@ private final class WalletImportScreenComponent: Component {
             _ prepared: WalletContext.PreparedRecoveryPhraseImport,
             password: String?
         ) {
-            guard let component = self.component else {
+            guard let component = self.component?.wallet else {
                 return
             }
             self.isImporting = true
@@ -1348,7 +1376,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func discardPreparedRecoveryPhraseImport(_ prepared: WalletContext.PreparedRecoveryPhraseImport) {
-            guard let component = self.component else {
+            guard let component = self.component?.wallet else {
                 return
             }
             self.activePreparedRecoveryPhraseImport = nil
@@ -1357,7 +1385,7 @@ private final class WalletImportScreenComponent: Component {
         }
 
         private func finishRecoveryPhraseImport() {
-            guard let component = self.component else {
+            guard let component = self.component?.wallet else {
                 return
             }
             self.activePreparedRecoveryPhraseImport = nil
@@ -1379,7 +1407,7 @@ private final class WalletImportScreenComponent: Component {
                 self.endWalletFlow()
                 return
             }
-            guard let component = self.component, let controller = self.environment?.controller() else {
+            guard let component = self.component?.wallet, let controller = self.environment?.controller() else {
                 return
             }
             let strings = component.context.sharedContext.currentPresentationData.with { $0 }.strings
@@ -1558,7 +1586,7 @@ private final class WalletImportScreenComponent: Component {
                 self.isVerificationInProgress = false
                 switch component.mode {
                 case .importWallet, .enterRecoveryPhrase, .enableBackup:
-                    self.setupWordInputFields(displayNumbers: Array(1 ... 12), preserving: [])
+                    self.setupWordInputFields(displayNumbers: Array(1 ... (component.recovery == nil ? 12 : 24)), preserving: [])
                 case .verify:
                     self.setupWordInputFields(
                         displayNumbers: component.verificationIndices.map { $0 + 1 },
@@ -1579,13 +1607,13 @@ private final class WalletImportScreenComponent: Component {
             case .importWallet:
                 isVerificationMode = false
                 animationName = "WalletWordList"
-                titleText = environment.strings.Wallet_Import_Title
+                titleText = component.recovery != nil ? environment.strings.blah_Identity_RecoveryWords : environment.strings.Wallet_Import_Title
                 bodyContent = .plain(NSAttributedString(
-                    string: environment.strings.Wallet_Import_Text,
+                    string: component.recovery != nil ? environment.strings.blah_Identity_EnterWordsText : environment.strings.Wallet_Import_Text,
                     font: Font.regular(16.0),
                     textColor: theme.list.itemPrimaryTextColor
                 ))
-                buttonTitle = environment.strings.Wallet_Import_Action
+                buttonTitle = component.recovery != nil ? environment.strings.Login_Continue : environment.strings.Wallet_Import_Action
             case .enterRecoveryPhrase:
                 isVerificationMode = false
                 animationName = "WalletWordCheck"
@@ -1616,7 +1644,7 @@ private final class WalletImportScreenComponent: Component {
                 let displayedIndices = component.verificationIndices.map { String($0 + 1) }
                 let formattedBodyText: String
                 if displayedIndices.count == 3 {
-                    formattedBodyText = environment.strings.Wallet_Import_TestText(displayedIndices[0], displayedIndices[1], displayedIndices[2]).string
+                    formattedBodyText = component.recovery != nil ? environment.strings.blah_Identity_VerifyWords(displayedIndices[0], displayedIndices[1], displayedIndices[2]).string : environment.strings.Wallet_Import_TestText(displayedIndices[0], displayedIndices[1], displayedIndices[2]).string
                 } else {
                     formattedBodyText = environment.strings.Wallet_Import_TestTextFallback
                 }
@@ -1666,7 +1694,7 @@ private final class WalletImportScreenComponent: Component {
                     size: animationSize,
                     loop: false,
                     playOnce: self.playAnimation,
-                    lottieSettings: component.context.lottieRenderingSettings
+                    lottieSettings: component.wallet?.context.lottieRenderingSettings ?? .noAccountFallback
                 )),
                 environment: {},
                 containerSize: animationSize
@@ -1806,7 +1834,7 @@ private final class WalletImportScreenComponent: Component {
             )
             let fieldX = floorToScreenPixels((availableSize.width - fieldWidth) * 0.5)
 
-            if isVerificationMode {
+            if isVerificationMode || component.recovery != nil {
                 self.wordCountControl.view?.removeFromSuperview()
             } else {
                 self.wordCountControl.parentState = state
@@ -2086,13 +2114,29 @@ private final class WalletImportScreenComponent: Component {
     }
 }
 
+/// Reuses the wallet's fields and suggestions without wallet operations.
+public final class WalletRecoveryWordsInput {
+    public let validate: ([String]) -> Bool
+    public let completed: ([String]) -> Void
+
+    public init(validate: @escaping ([String]) -> Bool, completed: @escaping ([String]) -> Void) {
+        self.validate = validate
+        self.completed = completed
+    }
+}
+
 public final class WalletImportScreen: ViewControllerComponentContainer {
-    public init(
-        context: AccountContext,
-        walletContext: WalletContext,
-        mode: WalletImportScreenMode,
-        completion: (() -> Void)?
-    ) {
+    public convenience init(context: AccountContext, walletContext: WalletContext, mode: WalletImportScreenMode, completion: (() -> Void)?) {
+        self.init(wallet: WalletImportWallet(context: context, walletContext: walletContext, mode: mode, completion: completion),
+            sharedContext: context.sharedContext, recovery: nil, mode: mode, completion: completion)
+    }
+
+    public convenience init(sharedContext: SharedAccountContext, recovery: WalletRecoveryWordsInput, verifying words: [String]? = nil, completion: (() -> Void)? = nil) {
+        self.init(wallet: nil, sharedContext: sharedContext, recovery: recovery,
+            mode: words.map { .verify(words: $0) } ?? .importWallet, completion: completion)
+    }
+
+    private init(wallet: WalletImportWallet?, sharedContext: SharedAccountContext, recovery: WalletRecoveryWordsInput?, mode: WalletImportScreenMode, completion: (() -> Void)?) {
         let verificationIndices: [Int]
         switch mode {
         case .importWallet, .enterRecoveryPhrase, .enableBackup:
@@ -2110,27 +2154,29 @@ public final class WalletImportScreen: ViewControllerComponentContainer {
         }
 
         super.init(
-            context: context,
             component: WalletImportScreenComponent(
-                context: context,
-                walletContext: walletContext,
+                wallet: wallet,
+                sharedContext: sharedContext,
+                recovery: recovery,
                 mode: mode,
                 verificationIndices: verificationIndices,
                 completion: completion
             ),
             navigationBarAppearance: .default,
             statusBarStyle: .default,
-            theme: .default
+            theme: .default,
+            updatedPresentationData: (initial: sharedContext.currentPresentationData.with { $0 }, signal: sharedContext.presentationData)
         )
 
         self.title = ""
         self.navigationItem.backBarButtonItem = UIBarButtonItem(
-            title: context.sharedContext.currentPresentationData.with { $0 }.strings.Common_Back,
+            title: sharedContext.currentPresentationData.with { $0 }.strings.Common_Back,
             style: .plain,
             target: nil,
             action: nil
         )
         
+        self._hasGlassStyle = true
         self.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: .portrait)
 
         self.scrollToTop = { [weak self] in

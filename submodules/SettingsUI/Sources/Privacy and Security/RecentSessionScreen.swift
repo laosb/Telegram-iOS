@@ -1118,7 +1118,7 @@ private final class RecentSessionSheetComponent: CombinedComponent {
                         )
                     ),
                     hasTopEdgeEffect: false,
-                    bottomItem: buttonTitle.flatMap { buttonTitle in
+                    bottomItem: ((controller() as? RecentSessionScreen)?.canTerminate == false ? nil : buttonTitle).flatMap { buttonTitle in
                         AnyComponent(
                             ButtonComponent(
                                 background: ButtonComponent.Background(
@@ -1187,6 +1187,7 @@ public class RecentSessionScreen: ViewControllerComponentContainer {
     private let subject: Subject
     fileprivate let updateAcceptSecretChats: (Bool) -> Void
     fileprivate let updateAcceptIncomingCalls: (Bool) -> Void
+    fileprivate let canTerminate: Bool
     fileprivate let remove: (@escaping () -> Void) -> Void
     
     public init(
@@ -1194,12 +1195,14 @@ public class RecentSessionScreen: ViewControllerComponentContainer {
         subject: RecentSessionScreen.Subject,
         updateAcceptSecretChats: @escaping (Bool) -> Void,
         updateAcceptIncomingCalls: @escaping (Bool) -> Void,
+        canTerminate: Bool = true,
         remove: @escaping (@escaping () -> Void) -> Void
     ) {
         self.context = context
         self.subject = subject
         self.updateAcceptSecretChats = updateAcceptSecretChats
         self.updateAcceptIncomingCalls = updateAcceptIncomingCalls
+        self.canTerminate = canTerminate
         self.remove = remove
         
         super.init(
@@ -1227,6 +1230,7 @@ public class RecentSessionScreen: ViewControllerComponentContainer {
     }
     
     fileprivate func terminate() {
+        guard self.canTerminate else { return }
         switch self.subject {
         case .session, .website:
             self.remove({ [weak self] in

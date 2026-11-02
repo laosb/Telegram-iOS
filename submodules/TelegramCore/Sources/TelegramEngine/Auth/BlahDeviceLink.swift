@@ -289,7 +289,7 @@ public final class BlahDeviceLinkApproval {
             let store = BlahIdentityStore.shared
             let slot = self.account.network.blahIdentitySlot
             guard try await store.boundIdentityID(slot: slot) == self.id else { throw BlahIdentityError.wrongHome }
-            _ = try await store.unlock(id: self.id, slot: slot)
+            _ = try await store.unlock(slot: slot)
             return try await store.prepareDeviceLinkApproval(slot: slot, id: self.id,
                 account: self.account.peerId.id._internalGetInt64Value(), request: self.request)
         } |> mapError { .generic(blahDeviceLinkErrorText($0)) }
@@ -349,7 +349,8 @@ public func blahApproveDeviceLink(account: Account, url: String) -> Signal<BlahD
             let slot = account.network.blahIdentitySlot
             try await store.validateRestoredBinding(slot: slot)
             guard let id = try await store.boundIdentityID(slot: slot),
-                let entry = try await store.list().first(where: { $0.id == id }) else { throw BlahIdentityError.wrongHome }
+                let entry = try await store.identity(slot: slot), entry.id == id else { throw BlahIdentityError.wrongHome }
+            guard try await store.isHolder(slot: slot) else { throw BlahIdentityError.managementRequired }
             return BlahDeviceLinkApproval(account: account, token: parsed.token, code: parsed.code,
                 request: result.request, label: request.label, domain: entry.domain, id: id)
         } |> mapError { .generic(blahDeviceLinkErrorText($0)) }

@@ -11,6 +11,7 @@ swift_library(
     ],
     deps = [
         "//submodules/BlahIdentityUI",
+        "//submodules/BlahIdentity",
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/LottieSettings:LottieSettings",
         "//submodules/TelegramCore:TelegramCore",

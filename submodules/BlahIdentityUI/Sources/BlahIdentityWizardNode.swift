@@ -100,7 +100,7 @@ final class BlahIdentityWizardNode: ASDisplayNode, UITextFieldDelegate {
         field.addTarget(self, action: #selector(textChanged), for: .editingChanged)
         lineNode.backgroundColor = theme.list.itemPlainSeparatorColor
         let syncSwitch = syncNode.view as! UISwitch
-        syncSwitch.isOn = true
+        syncSwitch.isOn = false
         syncSwitch.accessibilityLabel = presentationData.strings.blah_IdentityWizard_Sync
         (biometricNode.view as! UISwitch).accessibilityLabel = presentationData.strings.blah_IdentityWizard_FaceID
         imageNode.contentMode = .scaleAspectFit

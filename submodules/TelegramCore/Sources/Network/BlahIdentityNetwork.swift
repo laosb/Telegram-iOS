@@ -44,7 +44,7 @@ extension Network {
         Task {
             do {
                 if let home = try await BlahIdentityStore.shared.restoreHome(slot: self.blahIdentitySlot, refresh: refresh) {
-                    try await BlahIdentityStore.shared.validateRestoredBinding(slot: self.blahIdentitySlot, required: self.blahRequiresRestoredBinding)
+                    try await BlahIdentityStore.shared.validateRestoredBinding(slot: self.blahIdentitySlot, required: self.blahRequiresRestoredBinding, allowRemoved: !refresh)
                     try await self.activateBlahHome(home)
                 }
             } catch {
@@ -61,6 +61,13 @@ extension Network {
         let home = try await BlahIdentityStore.shared.connect(domain: domain, slot: self.blahIdentitySlot)
         try await BlahIdentityStore.shared.validateRestoredBinding(slot: self.blahIdentitySlot, required: self.blahRequiresRestoredBinding)
         try await self.activateBlahHome(home)
+    }
+
+    public func restartBlahAuthorization() async throws -> BlahHome {
+        guard !self.blahRequiresRestoredBinding, self.datacenterId == 1 else { throw BlahIdentityError.wrongHome }
+        let home = try await BlahIdentityStore.shared.restartAuthorization(slot: self.blahIdentitySlot)
+        try await self.activateBlahHome(home)
+        return home
     }
 
     private func activateBlahHome(_ home: BlahHome) async throws {
@@ -209,10 +216,13 @@ func blahLoginErrorText(_ code: String) -> String? {
     case "IDENTITY_PROFILE_INVALID": message = "Your published profile is malformed, invalid or expired. Publish a valid profile, then try again."
     case "IDENTITY_PROFILE_STALE": message = "Your published profile is older than or conflicts with the profile this DC has accepted. Publish your latest profile, then try again."
     case "IDENTITY_HOME_INVALID": message = "Your published profile does not have a valid home delegation for this DC. Check your home and publish your latest profile."
+    case "DEVICE_KEY_IN_USE": message = "This device key already backs a session. Start a new sign-in."
+    case "DEVICE_KEY_RETIRED": message = "This device key has been retired. Start a new sign-in with recovery words or QR code."
+    case "DEVICE_STILL_LISTED": message = "Publish the profile without the terminated devices, then try again."
     case "IDENTITY_DEVICE_INVALID": message = "The DC could not verify this device. The profile listing this device may not be published yet. Publish your latest profile, then try again."
     case "IDENTITY_ACCOUNT_MISMATCH": message = "Your published profile does not name this account yet. Publish your latest profile, then sign in again."
-    case "IDENTITY_PROOF_REQUIRED": message = "The DC requires an identity proof. Unlock your identity and sign in again."
-    case "BLAH_IDENTITY_REQUIRED": message = "This sign-in method requires a Blah identity. Choose an identity to continue."
+    case "IDENTITY_PROOF_REQUIRED": message = "The DC requires an identity proof. Sign in with recovery words or a QR code."
+    case "BLAH_IDENTITY_REQUIRED": message = "Sign in with recovery words or a QR code to continue."
     case "IDENTITY_CHALLENGE_INVALID": message = "The identity challenge is invalid or expired. Try signing in again."
     case "SIGNUP_CLOSED": message = "This DC is not accepting new accounts."
     case "DEVICE_AUTH_REQUIRED": message = "The DC requires an authorized identity device."
@@ -342,4 +352,78 @@ private func blahReadLinkBytes(_ reader: BufferReader, maximum: Int) -> Data? {
         guard let bytes = reader.readBuffer(padding), bytes.makeData().allSatisfy({ $0 == 0 }) else { return nil }
     }
     return bytes.makeData()
+}
+
+struct BlahSessionDevice {
+    let hash: Int64
+    let device: Data
+}
+
+struct BlahSessionDevices {
+    let sessions: [BlahSessionDevice]
+    let retired: [Data]
+}
+
+extension Network {
+    func blahSessionDevices() -> Signal<BlahSessionDevices, MTRpcError> {
+        let buffer = Buffer()
+        buffer.appendInt32(Int32(bitPattern: 0x0ea8e1b2)) // blah.getSessionDevices
+        let parse = DeserializeFunctionResponse<BlahSessionDevices> { buffer in
+            let reader = BufferReader(buffer)
+            guard reader.readInt32() == Int32(bitPattern: 0xbc65209e),
+                reader.readInt32() == Int32(bitPattern: 0x1cb5c415),
+                let count = reader.readInt32(), count >= 0, count <= 128 else { return nil }
+            var result: [BlahSessionDevice] = []
+            var hashes = Set<Int64>()
+            for _ in 0 ..< count {
+                guard reader.readInt32() == Int32(bitPattern: 0x71d54a81),
+                    let hash = reader.readInt64(), hashes.insert(hash).inserted,
+                    let device = blahReadLinkBytes(reader, maximum: 32), device.count == 32 else { return nil }
+                result.append(BlahSessionDevice(hash: hash, device: device))
+            }
+            guard reader.readInt32() == Int32(bitPattern: 0x1cb5c415),
+                let retiredCount = reader.readInt32(), retiredCount >= 0, retiredCount <= 128 else { return nil }
+            var retired: [Data] = []
+            var ids = Set<Data>()
+            for _ in 0 ..< retiredCount {
+                guard let device = blahReadLinkBytes(reader, maximum: 32), device.count == 32,
+                    ids.insert(device).inserted else { return nil }
+                retired.append(device)
+            }
+            guard reader.offset == UInt(buffer.size) else { return nil }
+            return BlahSessionDevices(sessions: result, retired: retired)
+        }
+        return self.blahRawRequest(blahLayered((FunctionDescription(name: "blah.getSessionDevices", parameters: []), buffer, parse)), automaticFloodWait: false)
+    }
+
+    public func blahSessionManagementAvailable() -> Signal<Bool, NoError> {
+        return blahTask {
+            let store = BlahIdentityStore.shared
+            if try await store.boundIdentityID(slot: self.blahIdentitySlot) == nil { return true }
+            return try await store.isHolder(slot: self.blahIdentitySlot)
+        } |> `catch` { _ in .single(false) }
+    }
+
+    func blahPrepareSessionTermination(hash: Int64?) -> Signal<Void, MTRpcError> {
+        return blahTask { try await BlahIdentityStore.shared.boundIdentityID(slot: self.blahIdentitySlot) != nil }
+        |> mapToSignal { bound -> Signal<Void, MTRpcError> in
+            guard bound else { return .single(()) }
+            return self.blahSessionDevices() |> mapToSignal { devices in
+                blahTask {
+                    let victims = devices.sessions.filter { hash == nil ? $0.hash != 0 : $0.hash == hash! }
+                    try await BlahIdentityStore.shared.removeDevices(slot: self.blahIdentitySlot, ids: victims.map { $0.device })
+                }
+            }
+        }
+    }
+
+    public func blahPruneSessionDevices() -> Signal<Void, NoError> {
+        return blahTask { try await BlahIdentityStore.shared.isHolder(slot: self.blahIdentitySlot) }
+        |> mapToSignal { holder -> Signal<Void, MTRpcError> in
+            guard holder else { return .single(()) }
+            return self.blahSessionDevices() |> mapToSignal { devices in
+                blahTask { try await BlahIdentityStore.shared.pruneDevices(slot: self.blahIdentitySlot, retired: devices.retired) }
+            }
+        } |> `catch` { _ in .single(()) }
+    }
 }

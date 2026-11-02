@@ -1,4 +1,5 @@
 import Foundation
+import BlahIdentityUI
 import UIKit
 import Display
 import SwiftSignalKit
@@ -119,12 +120,12 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
     case currentAddDevice(SortIndex, String)
     case currentSessionInfo(SortIndex, String)
     case pendingSessionsHeader(SortIndex, String)
-    case pendingSession(index: Int32, sortIndex: SortIndex, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, session: RecentAccountSession, enabled: Bool, editing: Bool, revealed: Bool)
+    case pendingSession(index: Int32, sortIndex: SortIndex, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, session: RecentAccountSession, enabled: Bool, editing: Bool, revealed: Bool, editable: Bool)
     case pendingSessionsInfo(SortIndex, String)
     case otherSessionsHeader(SortIndex, String)
     case addDevice(SortIndex, String)
     case connectedBot(sortIndex: SortIndex, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, nameDisplayOrder: PresentationPersonNameOrder, bot: TelegramAccountConnectedBot, peer: EnginePeer?, enabled: Bool)
-    case session(index: Int32, sortIndex: SortIndex, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, session: RecentAccountSession, enabled: Bool, editing: Bool, revealed: Bool)
+    case session(index: Int32, sortIndex: SortIndex, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, session: RecentAccountSession, enabled: Bool, editing: Bool, revealed: Bool, editable: Bool)
     case website(index: Int32, sortIndex: SortIndex, strings: PresentationStrings, dateTimeFormat: PresentationDateTimeFormat, nameDisplayOrder: PresentationPersonNameOrder, website: WebAuthorization, peer: EnginePeer?, enabled: Bool, editing: Bool, revealed: Bool)
     case devicesInfo(SortIndex, String)
     case ttlHeader(SortIndex, String)
@@ -163,7 +164,7 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             return .index(6)
         case .pendingSessionsHeader:
             return .index(7)
-        case let .pendingSession(_, _, _, _, session, _, _, _):
+        case let .pendingSession(_, _, _, _, session, _, _, _, _):
             return .session(session.hash)
         case .pendingSessionsInfo:
             return .index(8)
@@ -173,7 +174,7 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             return .index(10)
         case let .connectedBot(_, _, _, _, bot, _, _):
             return .connectedBot(bot.id)
-        case let .session(_, _, _, _, session, _, _, _):
+        case let .session(_, _, _, _, session, _, _, _, _):
             return .session(session.hash)
         case let .website(_, _, _, _, _, website, _, _, _, _):
             return .session(website.hash)
@@ -204,7 +205,7 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             return index
         case let .pendingSessionsHeader(index, _):
             return index
-        case let .pendingSession(_, index, _, _, _, _, _, _):
+        case let .pendingSession(_, index, _, _, _, _, _, _, _):
             return index
         case let .pendingSessionsInfo(index, _):
             return index
@@ -214,7 +215,7 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             return index
         case let .connectedBot(index, _, _, _, _, _, _):
             return index
-        case let .session(_, index, _, _, _, _, _, _):
+        case let .session(_, index, _, _, _, _, _, _, _):
             return index
         case let .website(_, index, _, _, _, _, _, _, _, _):
             return index
@@ -271,8 +272,8 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             } else {
                 return false
             }
-        case let .pendingSession(lhsIndex, lhsSortIndex, lhsStrings, lhsDateTimeFormat, lhsSession, lhsEnabled, lhsEditing, lhsRevealed):
-            if case let .pendingSession(rhsIndex, rhsSortIndex, rhsStrings, rhsDateTimeFormat, rhsSession, rhsEnabled, rhsEditing, rhsRevealed) = rhs, lhsIndex == rhsIndex, lhsSortIndex == rhsSortIndex, lhsStrings === rhsStrings, lhsDateTimeFormat == rhsDateTimeFormat, lhsSession == rhsSession, lhsEnabled == rhsEnabled, lhsEditing == rhsEditing, lhsRevealed == rhsRevealed {
+        case let .pendingSession(lhsIndex, lhsSortIndex, lhsStrings, lhsDateTimeFormat, lhsSession, lhsEnabled, lhsEditing, lhsRevealed, lhsEditable):
+            if case let .pendingSession(rhsIndex, rhsSortIndex, rhsStrings, rhsDateTimeFormat, rhsSession, rhsEnabled, rhsEditing, rhsRevealed, rhsEditable) = rhs, lhsIndex == rhsIndex, lhsSortIndex == rhsSortIndex, lhsStrings === rhsStrings, lhsDateTimeFormat == rhsDateTimeFormat, lhsSession == rhsSession, lhsEnabled == rhsEnabled, lhsEditing == rhsEditing, lhsRevealed == rhsRevealed, lhsEditable == rhsEditable {
                 return true
             } else {
                 return false
@@ -307,8 +308,8 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             } else {
                 return false
             }
-        case let .session(lhsIndex, lhsSortIndex, lhsStrings, lhsDateTimeFormat, lhsSession, lhsEnabled, lhsEditing, lhsRevealed):
-            if case let .session(rhsIndex, rhsSortIndex, rhsStrings, rhsDateTimeFormat, rhsSession, rhsEnabled, rhsEditing, rhsRevealed) = rhs, lhsIndex == rhsIndex, lhsSortIndex == rhsSortIndex, lhsStrings === rhsStrings, lhsDateTimeFormat == rhsDateTimeFormat, lhsSession == rhsSession, lhsEnabled == rhsEnabled, lhsEditing == rhsEditing, lhsRevealed == rhsRevealed {
+        case let .session(lhsIndex, lhsSortIndex, lhsStrings, lhsDateTimeFormat, lhsSession, lhsEnabled, lhsEditing, lhsRevealed, lhsEditable):
+            if case let .session(rhsIndex, rhsSortIndex, rhsStrings, rhsDateTimeFormat, rhsSession, rhsEnabled, rhsEditing, rhsRevealed, rhsEditable) = rhs, lhsIndex == rhsIndex, lhsSortIndex == rhsSortIndex, lhsStrings === rhsStrings, lhsDateTimeFormat == rhsDateTimeFormat, lhsSession == rhsSession, lhsEnabled == rhsEnabled, lhsEditing == rhsEditing, lhsRevealed == rhsRevealed, lhsEditable == rhsEditable {
                 return true
             } else {
                 return false
@@ -391,8 +392,8 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
             })
         case let .pendingSessionsHeader(_, text):
             return ItemListSectionHeaderItem(presentationData: presentationData, text: text, sectionId: self.section)
-        case let .pendingSession(_, _, _, dateTimeFormat, session, enabled, editing, revealed):
-            return ItemListRecentSessionItem(presentationData: presentationData, systemStyle: .glass, dateTimeFormat: dateTimeFormat, session: session, enabled: enabled, editable: true, editing: editing, revealed: revealed, sectionId: self.section, setSessionIdWithRevealedOptions: { previousId, id in
+        case let .pendingSession(_, _, _, dateTimeFormat, session, enabled, editing, revealed, editable):
+            return ItemListRecentSessionItem(presentationData: presentationData, systemStyle: .glass, dateTimeFormat: dateTimeFormat, session: session, enabled: enabled, editable: editable, editing: editing, revealed: revealed, sectionId: self.section, setSessionIdWithRevealedOptions: { previousId, id in
                 arguments.setSessionIdWithRevealedOptions(previousId, id)
             }, removeSession: { id in
                 arguments.removeSession(id)
@@ -422,8 +423,8 @@ private enum RecentSessionsEntry: ItemListNodeEntry {
                     arguments.openConnectedBotSession(bot)
                 }
             )
-        case let .session(_, _, _, dateTimeFormat, session, enabled, editing, revealed):
-            return ItemListRecentSessionItem(presentationData: presentationData, systemStyle: .glass, dateTimeFormat: dateTimeFormat, session: session, enabled: enabled, editable: true, editing: editing, revealed: revealed, sectionId: self.section, setSessionIdWithRevealedOptions: { previousId, id in
+        case let .session(_, _, _, dateTimeFormat, session, enabled, editing, revealed, editable):
+            return ItemListRecentSessionItem(presentationData: presentationData, systemStyle: .glass, dateTimeFormat: dateTimeFormat, session: session, enabled: enabled, editable: editable, editing: editing, revealed: revealed, sectionId: self.section, setSessionIdWithRevealedOptions: { previousId, id in
                 arguments.setSessionIdWithRevealedOptions(previousId, id)
             }, removeSession: { id in
                 arguments.removeSession(id)
@@ -509,10 +510,10 @@ private struct RecentSessionsControllerState: Equatable {
     }
 }
 
-private func recentSessionsControllerEntries(presentationData: PresentationData, state: RecentSessionsControllerState, sessionsState: ActiveSessionsContextState, connectedBot: TelegramAccountConnectedBot?, connectedBotPeer: EnginePeer?, enableQRLogin: Bool) -> [RecentSessionsEntry] {
+private func recentSessionsControllerEntries(presentationData: PresentationData, state: RecentSessionsControllerState, sessionsState: ActiveSessionsContextState, connectedBot: TelegramAccountConnectedBot?, connectedBotPeer: EnginePeer?, enableQRLogin: Bool, canManageSessions: Bool) -> [RecentSessionsEntry] {
     var entries: [RecentSessionsEntry] = []
     
-    entries.append(.header(SortIndex(section: 0, item: 0), presentationData.strings.AuthSessions_HeaderInfo))
+    if canManageSessions { entries.append(.header(SortIndex(section: 0, item: 0), presentationData.strings.AuthSessions_HeaderInfo)) }
     
     if !sessionsState.sessions.isEmpty {
         var existingSessionIds = Set<Int64>()
@@ -526,7 +527,7 @@ private func recentSessionsControllerEntries(presentationData: PresentationData,
         
         var hasAddDevice = false
         if sessionsState.sessions.count > 1 || enableQRLogin || connectedBot != nil {
-            if sessionsState.sessions.count > 1 || connectedBot != nil {
+            if canManageSessions && (sessionsState.sessions.count > 1 || connectedBot != nil) {
                 entries.append(.terminateOtherSessions(SortIndex(section: 1, item: currentSessionItemIndex), presentationData.strings.AuthSessions_TerminateOtherSessions))
                 currentSessionItemIndex += 1
                 entries.append(.currentSessionInfo(SortIndex(section: 1, item: currentSessionItemIndex), presentationData.strings.AuthSessions_TerminateOtherSessionsHelp))
@@ -542,7 +543,7 @@ private func recentSessionsControllerEntries(presentationData: PresentationData,
                 for i in 0 ..< filteredPendingSessions.count {
                     if !existingSessionIds.contains(filteredPendingSessions[i].hash) {
                         existingSessionIds.insert(filteredPendingSessions[i].hash)
-                        entries.append(.pendingSession(index: Int32(i), sortIndex: SortIndex(section: 2, item: i), strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, session: filteredPendingSessions[i], enabled: state.removingSessionId != filteredPendingSessions[i].hash && !state.terminatingOtherSessions, editing: state.editing, revealed: state.sessionIdWithRevealedOptions == filteredPendingSessions[i].hash))
+                        entries.append(.pendingSession(index: Int32(i), sortIndex: SortIndex(section: 2, item: i), strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, session: filteredPendingSessions[i], enabled: state.removingSessionId != filteredPendingSessions[i].hash && !state.terminatingOtherSessions, editing: canManageSessions && state.editing, revealed: canManageSessions && state.sessionIdWithRevealedOptions == filteredPendingSessions[i].hash, editable: canManageSessions))
                     }
                 }
                 entries.append(.pendingSessionsInfo(SortIndex(section: 3, item: 0), presentationData.strings.AuthSessions_IncompleteAttemptsInfo))
@@ -568,7 +569,7 @@ private func recentSessionsControllerEntries(presentationData: PresentationData,
             for i in 0 ..< filteredSessions.count {
                 if !existingSessionIds.contains(filteredSessions[i].hash) {
                     existingSessionIds.insert(filteredSessions[i].hash)
-                    entries.append(.session(index: Int32(i), sortIndex: SortIndex(section: 5, item: otherSessionItemIndex), strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, session: filteredSessions[i], enabled: state.removingSessionId != filteredSessions[i].hash && !state.terminatingOtherSessions, editing: state.editing, revealed: state.sessionIdWithRevealedOptions == filteredSessions[i].hash))
+                    entries.append(.session(index: Int32(i), sortIndex: SortIndex(section: 5, item: otherSessionItemIndex), strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, session: filteredSessions[i], enabled: state.removingSessionId != filteredSessions[i].hash && !state.terminatingOtherSessions, editing: canManageSessions && state.editing, revealed: canManageSessions && state.sessionIdWithRevealedOptions == filteredSessions[i].hash, editable: canManageSessions))
                     otherSessionItemIndex += 1
                 }
             }
@@ -578,8 +579,14 @@ private func recentSessionsControllerEntries(presentationData: PresentationData,
             }
         }
         
+        if !canManageSessions {
+            entries.append(.currentSessionInfo(SortIndex(section: 8, item: 0), presentationData.strings.blah_Identity_HolderNotice))
+            entries.append(.currentAddDevice(SortIndex(section: 8, item: 1), presentationData.strings.blah_Identity_EnterWords))
+        }
+        if canManageSessions {
         entries.append(.ttlHeader(SortIndex(section: 7, item: 0), presentationData.strings.AuthSessions_TerminateIfAwayTitle.uppercased()))
         entries.append(.ttlTimeout(SortIndex(section: 7, item: 1), presentationData.strings.AuthSessions_TerminateIfAwayFor, timeIntervalString(strings: presentationData.strings, value: sessionsState.ttlDays * 24 * 60 * 60)))
+        }
     }
     
     return entries
@@ -678,7 +685,14 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
     
     let mode = ValuePromise<RecentSessionsMode>(websitesOnly ? .websites : .sessions)
     
+    let management = Promise<Bool>(false)
+    let canManageSessions = Atomic<Bool>(value: false)
+    let refreshManagement: () -> Void = {
+        management.set(context.account.network.blahSessionManagementAvailable())
+    }
+    refreshManagement()
     let removeSessionImpl: (Int64, @escaping () -> Void) -> Void = { sessionId, completion in
+        guard canManageSessions.with({ $0 }) else { return }
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let controller = textAlertController(
             context: context,
@@ -694,6 +708,8 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
                     
                     removeSessionDisposable.set((activeSessionsContext.remove(hash: sessionId)
                     |> deliverOnMainQueue).start(error: { _ in
+                        presentControllerImpl?(textAlertController(context: context, title: nil, text: presentationData.strings.blah_Identity_TerminationFailed,
+                            actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), nil)
                         updateState {
                             return $0.withUpdatedRemovingSessionId(nil)
                         }
@@ -745,6 +761,7 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
     }, removeSession: { sessionId in
         removeSessionImpl(sessionId, {})
     }, terminateOtherSessions: {
+        guard canManageSessions.with({ $0 }) else { return }
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let performTerminate: (Bool) -> Void = { terminateBot in
             updateState {
@@ -761,6 +778,8 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
             
             terminateOtherSessionsDisposable.set((signal
             |> deliverOnMainQueue).start(error: { _ in
+                presentControllerImpl?(textAlertController(context: context, title: nil, text: presentationData.strings.blah_Identity_TerminationFailed,
+                    actions: [TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})]), nil)
                 updateState {
                     return $0.withUpdatedTerminatingOtherSessions(false)
                 }
@@ -843,7 +862,7 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
             updateSessionDisposable.set(activeSessionsContext.updateSessionAcceptsSecretChats(session, accepts: value).start())
         }, updateAcceptIncomingCalls: { value in
             updateSessionDisposable.set(activeSessionsContext.updateSessionAcceptsIncomingCalls(session, accepts: value).start())
-        }, remove: { completion in
+        }, canTerminate: canManageSessions.with({ $0 }), remove: { completion in
             removeSessionImpl(session.hash, {
                 completion()
             })
@@ -893,6 +912,10 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
             ])
         presentControllerImpl?(controller, ViewControllerPresentationArguments(presentationAnimation: .modalSheet))
     }, addDevice: {
+        guard canManageSessions.with({ $0 }) else {
+            pushControllerImpl?(blahEnterRecoveryWordsController(network: context.account.network, sharedContext: context.sharedContext, completed: refreshManagement))
+            return
+        }
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         DeviceAccess.authorizeAccess(to: .camera(.qrCode), presentationData: presentationData, present: { c, a in
             c.presentationArguments = a
@@ -982,7 +1005,12 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
         let _ = connectedBotAndPeerValue.swap(value)
     }
     
-    let signal = combineLatest(context.sharedContext.presentationData, mode.get(), statePromise.get(), activeSessionsContext.state, webSessionsContext.state, enableQRLogin, connectedBotAndPeer)
+    let managedQR = combineLatest(enableQRLogin, management.get())
+    |> map { enabled, allowed -> (Bool, Bool) in
+        let _ = canManageSessions.swap(allowed)
+        return (enabled && allowed, allowed)
+    }
+    let signal = combineLatest(context.sharedContext.presentationData, mode.get(), statePromise.get(), activeSessionsContext.state, webSessionsContext.state, managedQR, connectedBotAndPeer)
     |> deliverOnMainQueue
     |> map { presentationData, mode, state, sessionsState, websitesAndPeers, enableQRLogin, connectedBotAndPeer -> (ItemListControllerState, (ItemListNodeState, Any)) in
         currentAuthorizationTTLDays = sessionsState.ttlDays
@@ -991,7 +1019,7 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
         let websites = websitesAndPeers.sessions
         let peers = websitesAndPeers.peers
         
-        if sessionsState.sessions.count > 1 {
+        if enableQRLogin.1 && sessionsState.sessions.count > 1 {
             if state.terminatingOtherSessions {
                 rightNavigationButton = ItemListNavigationButton(content: .none, style: .activity, enabled: true, staysInRow: true, action: {})
             } else if state.editing {
@@ -1024,7 +1052,7 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
             case (.websites, let websites, let peers):
                 entries = recentSessionsControllerEntries(presentationData: presentationData, state: state, websites: websites, peers: peers)
             default:
-                entries = recentSessionsControllerEntries(presentationData: presentationData, state: state, sessionsState: sessionsState, connectedBot: connectedBotAndPeer.0, connectedBotPeer: connectedBotAndPeer.1, enableQRLogin: enableQRLogin)
+                entries = recentSessionsControllerEntries(presentationData: presentationData, state: state, sessionsState: sessionsState, connectedBot: connectedBotAndPeer.0, connectedBotPeer: connectedBotAndPeer.1, enableQRLogin: enableQRLogin.0, canManageSessions: enableQRLogin.1)
         }
         
         let previousMode = previousMode.swap(mode)
@@ -1086,5 +1114,10 @@ public func recentSessionsController(context: AccountContext, activeSessionsCont
         }
     }
     
+    let previousDidAppear = controller.didAppear
+    controller.didAppear = { firstTime in
+        previousDidAppear?(firstTime)
+        refreshManagement()
+    }
     return controller
 }

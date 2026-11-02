@@ -27,6 +27,7 @@ swift_library(
         "//submodules/TelegramUI/Components/ButtonComponent",
         "//submodules/TelegramUI/Components/SegmentControlComponent",
         "//submodules/WalletContext",
+        "//third-party/wallet-engine:WalletEngineFFI",
         "//submodules/TelegramUI/Components/Wallet/WalletAuthorizationUI",
     ],
     visibility = [

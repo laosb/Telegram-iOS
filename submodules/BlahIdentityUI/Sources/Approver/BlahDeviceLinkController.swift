@@ -112,7 +112,6 @@ private final class DeviceLinkCoordinator {
         disposable.dispose()
         if let observer { NotificationCenter.default.removeObserver(observer) }
         if let shareFolder { try? FileManager.default.removeItem(at: shareFolder) }
-        Task { await BlahIdentityStore.shared.lock() }
     }
 
     func inspect() {
@@ -195,7 +194,6 @@ private final class DeviceLinkCoordinator {
                 // The requesting device completes sign-in after receiving the grant.
                 let sessions = self.activeSessionsContext
                 Queue.mainQueue().after(1.5, { sessions.loadMore() })
-                Task { await BlahIdentityStore.shared.lock() }
             case let .manualPublication(profile, url, retry):
                 self.publication = (profile, url, retry)
                 self.publicationNeedsUnlock = false
@@ -301,7 +299,6 @@ private final class DeviceLinkCoordinator {
         disposable.dispose()
         approval = nil
         publication = nil
-        Task { await BlahIdentityStore.shared.lock() }
         completion(done)
     }
 

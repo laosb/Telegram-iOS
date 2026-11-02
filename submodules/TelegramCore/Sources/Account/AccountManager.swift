@@ -368,33 +368,27 @@ public func currentAccount(allocateIfNotExists: Bool, networkArguments: NetworkI
 
 public func logoutFromAccount(id: AccountRecordId, accountManager: AccountManager<TelegramAccountManagerTypes>, alreadyLoggedOutRemotely: Bool) -> Signal<Void, NoError> {
     Logger.shared.log("AccountManager", "logoutFromAccount \(id)")
+    // The logged-out record is also a durable retry obligation if Keychain deletion fails.
     return accountManager.transaction { transaction -> Void in
         transaction.updateRecord(id, { current in
-            if alreadyLoggedOutRemotely {
-                return nil
-            } else if let current = current {
-                var found = false
-                for attribute in current.attributes {
-                    if case .loggedOut = attribute {
-                        found = true
-                        break
-                    }
-                }
-                if found {
-                    return current
-                } else {
-                    return AccountRecord(id: current.id, attributes: current.attributes + [.loggedOut(LoggedOutAccountAttribute())], temporarySessionId: nil)
-                }
-            } else {
-                return nil
-            }
+            guard let current else { return nil }
+            if current.attributes.contains(where: { if case .loggedOut = $0 { return true }; return false }) { return current }
+            return AccountRecord(id: current.id, attributes: current.attributes + [.loggedOut(LoggedOutAccountAttribute())], temporarySessionId: nil)
         })
+    } |> mapToSignal { _ in
+        blahInvalidateAccountCustody(slot: accountRecordIdPathName(id))
+    } |> mapToSignal { _ -> Signal<Void, NoError> in
+        guard alreadyLoggedOutRemotely else { return .single(()) }
+        return blahRemoveAccountCustody(slot: accountRecordIdPathName(id)) |> mapToSignal { _ in
+            accountManager.transaction { transaction -> Void in transaction.updateRecord(id, { _ in nil }) }
+        }
     }
 }
 
 public func managedCleanupAccounts(networkArguments: NetworkInitializationArguments, accountManager: AccountManager<TelegramAccountManagerTypes>, rootPath: String, auxiliaryMethods: AccountAuxiliaryMethods, encryptionParameters: ValueBoxEncryptionParameters) -> Signal<Void, NoError> {
     let currentTemporarySessionId = accountManager.temporarySessionId
     return Signal { subscriber in
+        let legacyCleanup = blahDiscardLegacyCustody(accountManager: accountManager)
         let loggedOutAccounts = Atomic<[AccountRecordId: MetaDisposable]>(value: [:])
         let _ = (accountManager.transaction { transaction -> Void in
             for record in transaction.getRecords() {
@@ -481,6 +475,7 @@ public func managedCleanupAccounts(networkArguments: NetworkInitializationArgume
         })
         
         return ActionDisposable {
+            legacyCleanup.cancel()
             disposable.dispose()
         }
     }
@@ -503,37 +498,29 @@ private func cleanupAccount(networkArguments: NetworkInitializationArguments, ac
             return false
         }
     })
-    return accountWithId(accountManager: accountManager, networkArguments: networkArguments, id: id, encryptionParameters: encryptionParameters, supplementary: true, isSupportUser: isSupportUser, rootPath: rootPath, beginWithTestingEnvironment: beginWithTestingEnvironment, backupData: nil, auxiliaryMethods: auxiliaryMethods)
+    let logout = accountWithId(accountManager: accountManager, networkArguments: networkArguments, id: id, encryptionParameters: encryptionParameters, supplementary: true, isSupportUser: isSupportUser, rootPath: rootPath, beginWithTestingEnvironment: beginWithTestingEnvironment, backupData: nil, auxiliaryMethods: auxiliaryMethods)
     |> mapToSignal { account -> Signal<Void, NoError> in
         switch account {
-            case .upgrading:
-                return .complete()
-            case .unauthorized:
-                return .complete()
-            case let .authorized(account):
-                account.shouldBeServiceTaskMaster.set(.single(.always))
-                return account.network.request(Api.functions.auth.logOut())
-                |> map(Optional.init)
-                |> `catch` { _ -> Signal<Api.auth.LoggedOut?, NoError> in
-                    return .single(nil)
+        case .upgrading:
+            return .complete()
+        case .unauthorized:
+            return .single(())
+        case let .authorized(account):
+            account.shouldBeServiceTaskMaster.set(.single(.always))
+            return account.network.request(Api.functions.auth.logOut())
+            |> map(Optional.init)
+            |> `catch` { _ -> Signal<Api.auth.LoggedOut?, NoError> in .single(nil) }
+            |> map { result -> Void in
+                if case let .loggedOut(data) = result, let token = data.futureAuthToken {
+                    storeFutureLoginToken(accountManager: accountManager, token: token.makeData())
                 }
-                |> mapToSignal { result -> Signal<Void, NoError> in
-                    switch result {
-                    case let .loggedOut(loggedOutData):
-                        let futureAuthToken = loggedOutData.futureAuthToken
-                        if let futureAuthToken = futureAuthToken {
-                            storeFutureLoginToken(accountManager: accountManager, token: futureAuthToken.makeData())
-                        }
-                    default:
-                        break
-                    }
-                    account.shouldBeServiceTaskMaster.set(.single(.never))
-                    return accountManager.transaction { transaction -> Void in
-                        transaction.updateRecord(id, { _ in
-                            return nil
-                        })
-                    }
-                }
+                account.shouldBeServiceTaskMaster.set(.single(.never))
+            }
         }
     }
+    return (logout |> take(1) |> timeout(3.0, queue: Queue.concurrentDefaultQueue(), alternate: .single(())))
+    |> mapToSignal { _ in blahRemoveAccountCustody(slot: accountRecordIdPathName(id)) }
+    |> mapToSignal { _ in accountManager.transaction { transaction -> Void in
+        transaction.updateRecord(id, { _ in nil })
+    } }
 }

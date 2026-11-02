@@ -44,22 +44,25 @@ private extension WalletWordsScreenMode {
 private final class WalletWordsScreenComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
 
-    let context: AccountContext
+    let lottieSettings: LottieRenderingSettings
+    let recovery: Bool
     let words: [String]
     let mode: WalletWordsScreenMode
     let bottomInset: CGFloat
 
-    init(context: AccountContext, words: [String], mode: WalletWordsScreenMode, bottomInset: CGFloat) {
-        self.context = context
+    init(lottieSettings: LottieRenderingSettings, recovery: Bool = false, words: [String], mode: WalletWordsScreenMode, bottomInset: CGFloat) {
+        self.recovery = recovery
+        self.lottieSettings = lottieSettings
         self.words = words
         self.mode = mode
         self.bottomInset = bottomInset
     }
 
     static func ==(lhs: WalletWordsScreenComponent, rhs: WalletWordsScreenComponent) -> Bool {
-        if lhs.context !== rhs.context {
+        if lhs.lottieSettings != rhs.lottieSettings {
             return false
         }
+        if lhs.recovery != rhs.recovery { return false }
         if lhs.words != rhs.words {
             return false
         }
@@ -109,8 +112,8 @@ private final class WalletWordsScreenComponent: Component {
             let bodyText: String
             switch component.mode {
             case .view, .verify, .backupDisable(updateSecretPhrase: false):
-                titleText = environment.strings.Wallet_Words_Title
-                bodyText = environment.strings.Wallet_SecretPhraseInfo
+                titleText = component.recovery ? environment.strings.blah_Identity_RecoveryWords : environment.strings.Wallet_Words_Title
+                bodyText = component.recovery ? environment.strings.blah_Identity_WordsNotice : environment.strings.Wallet_SecretPhraseInfo
             case .replacement, .backupDisable(updateSecretPhrase: true):
                 titleText = environment.strings.Wallet_Words_NewTitle
                 bodyText = environment.strings.Wallet_Words_NewText
@@ -129,7 +132,7 @@ private final class WalletWordsScreenComponent: Component {
                     size: animationSize,
                     loop: false,
                     playOnce: self.playAnimation,
-                    lottieSettings: component.context.lottieRenderingSettings
+                    lottieSettings: component.lottieSettings
                 )),
                 environment: {},
                 containerSize: animationSize
@@ -367,23 +370,29 @@ private final class WalletWordsScreenComponent: Component {
 private final class WalletWordsSheetComponent: CombinedComponent {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
 
-    let context: AccountContext
+    let lottieSettings: LottieRenderingSettings
+    let recovery: Bool
     let words: [String]
     let mode: WalletWordsScreenMode
+    let doneEnabled: Bool
 
-    init(context: AccountContext, words: [String], mode: WalletWordsScreenMode) {
-        self.context = context
+    init(lottieSettings: LottieRenderingSettings, recovery: Bool = false, words: [String], mode: WalletWordsScreenMode, doneEnabled: Bool = true) {
+        self.recovery = recovery
+        self.lottieSettings = lottieSettings
         self.words = words
         self.mode = mode
+        self.doneEnabled = doneEnabled
     }
 
     static func ==(lhs: WalletWordsSheetComponent, rhs: WalletWordsSheetComponent) -> Bool {
-        if lhs.context !== rhs.context {
+        if lhs.lottieSettings != rhs.lottieSettings {
             return false
         }
+        if lhs.recovery != rhs.recovery { return false }
         if lhs.words != rhs.words {
             return false
         }
+        if lhs.doneEnabled != rhs.doneEnabled { return false }
         if lhs.mode != rhs.mode {
             return false
         }
@@ -435,7 +444,8 @@ private final class WalletWordsSheetComponent: CombinedComponent {
             let sheetComponent = sheet.update(
                 component: ResizableSheetComponent<EnvironmentType>(
                     content: AnyComponent<EnvironmentType>(WalletWordsScreenComponent(
-                        context: context.component.context,
+                        lottieSettings: context.component.lottieSettings,
+                        recovery: context.component.recovery,
                         words: context.component.words,
                         mode: context.component.mode,
                         bottomInset: contentBottomInset
@@ -474,7 +484,7 @@ private final class WalletWordsSheetComponent: CombinedComponent {
                                 color: theme.list.itemCheckColors.foregroundColor
                             ))
                         ),
-                        isEnabled: true,
+                        isEnabled: context.component.doneEnabled,
                         displaysProgress: false,
                         action: {
                             (controller() as? WalletWordsScreen)?.complete()
@@ -515,7 +525,10 @@ private final class WalletWordsSheetComponent: CombinedComponent {
 }
 
 public final class WalletWordsScreen: ViewControllerComponentContainer {
-    private let context: AccountContext
+    private let context: AccountContext?
+    private let sharedContext: SharedAccountContext
+    private let verification: ((@escaping () -> Void) -> ViewController)?
+    private let recovery: Bool
     private let words: [String]
     private let mode: WalletWordsScreenMode
     private let completion: (() -> Void)?
@@ -525,6 +538,7 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
     private var pendingAutomaticDismissal = false
     private var automaticDismissalScheduled = false
     private var isVerifying = false
+    private var didStartCompletionDelay = false
     private var isDismissingProgrammatically = false
     private weak var cancelDisableBackupController: ViewController?
 
@@ -538,30 +552,51 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
         )
     }
 
-    public init(context: AccountContext, words: [String], mode: WalletWordsScreenMode, dismissOnBackgroundOrLock: Bool = false, completion: (() -> Void)?) {
+    public convenience init(context: AccountContext, words: [String], mode: WalletWordsScreenMode, dismissOnBackgroundOrLock: Bool = false, completion: (() -> Void)?) {
+        self.init(context: context, sharedContext: context.sharedContext, recovery: false, words: words, mode: mode,
+            dismissOnBackgroundOrLock: dismissOnBackgroundOrLock, verification: nil, completion: completion)
+    }
+
+    public convenience init(sharedContext: SharedAccountContext, words: [String]) {
+        self.init(context: nil, sharedContext: sharedContext, recovery: true, words: words, mode: .view,
+            dismissOnBackgroundOrLock: true, verification: nil, completion: nil)
+    }
+
+    public convenience init(sharedContext: SharedAccountContext, words: [String],
+        verification: @escaping (@escaping () -> Void) -> ViewController, completion: @escaping () -> Void) {
+        self.init(context: nil, sharedContext: sharedContext, recovery: true, words: words, mode: .verify,
+            dismissOnBackgroundOrLock: true, verification: verification, completion: completion)
+    }
+
+    private init(context: AccountContext?, sharedContext: SharedAccountContext, recovery: Bool, words: [String], mode: WalletWordsScreenMode,
+        dismissOnBackgroundOrLock: Bool, verification: ((@escaping () -> Void) -> ViewController)?, completion: (() -> Void)?) {
+        self.sharedContext = sharedContext
+        self.verification = verification
+        self.recovery = recovery
         self.context = context
         self.words = words
         self.mode = mode
         self.completion = completion
 
         super.init(
-            context: context,
-            component: WalletWordsSheetComponent(context: context, words: words, mode: mode),
+            component: WalletWordsSheetComponent(lottieSettings: context?.lottieRenderingSettings ?? .noAccountFallback, recovery: recovery, words: words, mode: mode, doneEnabled: !(recovery && mode == .verify)),
             navigationBarAppearance: .none,
             statusBarStyle: .ignore,
-            theme: .default
+            theme: .default,
+            updatedPresentationData: (initial: sharedContext.currentPresentationData.with { $0 }, signal: sharedContext.presentationData)
         )
 
+        self._hasGlassStyle = true
         self.supportedOrientations = ViewControllerSupportedOrientations(regularSize: .all, compactSize: .portrait)
         self.statusBar.statusBarStyle = .Ignore
         self.navigationPresentation = .flatModal
         self.blocksBackgroundWhenInOverlay = true
         
-        self.idleTimerExtensionDisposable.set(context.sharedContext.applicationBindings.pushIdleTimerExtension())
+        self.idleTimerExtensionDisposable.set(sharedContext.applicationBindings.pushIdleTimerExtension())
         if dismissOnBackgroundOrLock {
             self.backgroundOrLockDisposable.set((combineLatest(
-                context.sharedContext.applicationBindings.applicationInForeground,
-                context.sharedContext.appLockContext.isPasscodeLocked
+                sharedContext.applicationBindings.applicationInForeground,
+                sharedContext.appLockContext.isPasscodeLocked
             )
             |> filter { foreground, locked in !foreground || locked }
             |> take(1)
@@ -585,6 +620,14 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
     override public func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         self.scheduleAutomaticDismissal()
+        if self.recovery && self.mode == .verify && !self.didStartCompletionDelay {
+            self.didStartCompletionDelay = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+                guard let self, !self.pendingAutomaticDismissal else { return }
+                self.updateComponent(component: AnyComponent(WalletWordsSheetComponent(lottieSettings: self.context?.lottieRenderingSettings ?? .noAccountFallback, recovery: true,
+                    words: self.words, mode: self.mode, doneEnabled: true)), transition: .immediate)
+            }
+        }
     }
 
     private func scheduleAutomaticDismissal() {
@@ -612,9 +655,9 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
             return
         }
 
-        let strings = self.context.sharedContext.currentPresentationData.with { $0 }.strings
+        let strings = self.sharedContext.currentPresentationData.with { $0 }.strings
         let controller = textAlertController(
-            context: self.context,
+            sharedContext: self.sharedContext,
             title: strings.Wallet_Backup_CancelDisablingTitle,
             text: strings.Wallet_Backup_CancelDisablingText,
             actions: [
@@ -632,12 +675,12 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
         guard !self.pendingAutomaticDismissal, !self.words.isEmpty, !self.isVerifying else {
             return
         }
-        if self.mode.retainsVerificationScreens, Date().timeIntervalSince(self.displayedAt) < 10.0 {
+        if (self.mode.retainsVerificationScreens || (self.recovery && self.mode == .verify)), Date().timeIntervalSince(self.displayedAt) < 10.0 {
             self.present(textAlertController(
-                context: self.context,
-                title: self.context.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_Words_TooFastTitle,
-                text: self.context.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_Words_TooFastText,
-                actions: [TextAlertAction(type: .genericAction, title: self.context.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_Words_TooFastAction, action: {
+                sharedContext: self.sharedContext,
+                title: self.recovery ? self.sharedContext.currentPresentationData.with { $0 }.strings.blah_Identity_RecoveryWords : self.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_Words_TooFastTitle,
+                text: self.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_Words_TooFastText,
+                actions: [TextAlertAction(type: .genericAction, title: self.recovery ? self.sharedContext.currentPresentationData.with { $0 }.strings.Common_OK : self.sharedContext.currentPresentationData.with { $0 }.strings.Wallet_Words_TooFastAction, action: {
                 })]
             ), in: .window(.root))
             return
@@ -645,8 +688,25 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
         if self.mode != .view {
             self.isVerifying = true
             let wordsController: ViewController = self
-            let verificationController = self.context.sharedContext.makeWalletImportScreen(
-                context: self.context,
+            if let verification = self.verification {
+                let verificationController = verification { [weak self, weak wordsController] in
+                    guard let self, let wordsController else { return }
+                    self.isVerifying = false
+                    if let navigation = wordsController.navigationController as? NavigationController,
+                        let index = navigation.viewControllers.firstIndex(where: { $0 === wordsController }) {
+                        navigation.setViewControllers(Array(navigation.viewControllers.prefix(upTo: index)), animated: false)
+                    }
+                    self.completion?()
+                }
+                if let screen = verificationController as? ViewControllerComponentContainer {
+                    screen.wasDismissed = { [weak self] in self?.isVerifying = false }
+                }
+                self.push(verificationController)
+                return
+            }
+            guard let context = self.context else { self.isVerifying = false; return }
+            let verificationController = self.sharedContext.makeWalletImportScreen(
+                context: context,
                 mode: .verify(
                     words: self.words,
                     keyRotation: self.mode.verifiesRotatedKey,

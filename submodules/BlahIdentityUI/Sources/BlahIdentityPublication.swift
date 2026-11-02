@@ -13,10 +13,43 @@ import TelegramPresentationData
 @MainActor private var publicationChecks = Set<String>()
 @MainActor private var publicationRechecks: [String: () -> Void] = [:]
 
+@MainActor private var identityMaintenanceDisposable: Disposable?
+@MainActor private var identityMaintenanceTask: Task<Void, Never>?
+
+@MainActor private func startIdentityMaintenance(sharedContext: SharedAccountContext) {
+    guard identityMaintenanceDisposable == nil else { return }
+    identityMaintenanceDisposable = (combineLatest(sharedContext.applicationBindings.applicationInForeground,
+        sharedContext.activeAccountContexts) |> deliverOnMainQueue).start(next: { foreground, accounts in
+        identityMaintenanceTask?.cancel()
+        identityMaintenanceTask = Task { @MainActor in
+            guard !Task.isCancelled else { return }
+            guard foreground else { await BlahIdentityStore.shared.lock(); return }
+            for (_, context, _) in accounts.accounts {
+                guard !Task.isCancelled else { return }
+                let network = context.account.network
+                if (try? await BlahIdentityStore.shared.isHolder(slot: network.blahIdentitySlot)) == true {
+                    _ = try? await BlahIdentityStore.shared.unlock(slot: network.blahIdentitySlot)
+                    guard !Task.isCancelled else { return }
+                    await waitForIdentityMaintenance(network.blahPruneSessionDevices())
+                }
+            }
+        }
+    })
+}
+
+private func waitForIdentityMaintenance(_ signal: Signal<Void, NoError>) async {
+    let stream = AsyncStream<Void> { continuation in
+        let disposable = signal.start(next: { continuation.yield($0) }, completed: { continuation.finish() })
+        continuation.onTermination = { _ in disposable.dispose() }
+    }
+    for await _ in stream { break }
+}
+
 /// Publication prompts are once per launch; outstanding DC refreshes retry on every activation.
 public func presentBlahPendingPublication(context: AccountContext, from controller: UIViewController) {
     guard context.sharedContext.applicationBindings.isMainApp else { return }
     Task { @MainActor [weak controller] in
+        defer { startIdentityMaintenance(sharedContext: context.sharedContext) }
         guard let currentController = controller,
             context.sharedContext.mainWindow?.viewController === currentController else { return }
         let network = context.account.network
@@ -48,7 +81,7 @@ public func presentBlahPendingPublication(context: AccountContext, from controll
             var message: String?
             if pending.hostingDomain != nil {
                 do {
-                    try await BlahIdentityStore.shared.retryPublication(id: pending.id)
+                    try await BlahIdentityStore.shared.retryPublication(slot: slot)
                     published = true
                     if let renewed = try await refreshIdentityPublication(network: network, id: pending.id, allowUnlock: false) {
                         pending = renewed
@@ -83,7 +116,7 @@ func refreshIdentityPublication(network: Network, id: String, allowUnlock: Bool)
     }
     if (try? await store.inspect(slot: slot))?.id != id {
         guard allowUnlock else { throw BlahIdentityError.locked }
-        _ = try await store.unlock(id: id, slot: slot)
+        _ = try await store.unlock(slot: slot)
     }
     if let pending = try await store.pendingPublication(slot: slot) { return pending }
     let identity = try await store.inspect(slot: slot)
@@ -108,7 +141,7 @@ func refreshIdentityPublication(network: Network, id: String, allowUnlock: Bool)
     if let pending = try await store.pendingPublication(slot: slot) { return pending }
     if let error { throw IdentityPublicationFailure(message: error) }
     guard try await store.boundIdentityID(slot: slot) == id else { throw BlahIdentityError.wrongHome }
-    try await store.markRefreshed(id: id, profile: profile)
+    try await store.markRefreshed(slot: slot, profile: profile)
     if let pending = try await store.pendingPublication(slot: slot) { return pending }
     guard try await store.refreshPending(slot: slot) == nil else { throw BlahIdentityError.staleProfile }
     return try await store.pendingPublication(slot: slot)

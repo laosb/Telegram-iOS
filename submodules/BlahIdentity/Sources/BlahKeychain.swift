@@ -2,7 +2,7 @@ import Foundation
 import Security
 import BlahDiem
 
-// Custody lives outside Postbox, account directories and transport logout.
+// Slot custody lives outside Postbox; logout removes its opaque Secure Enclave references.
 @available(iOS 18.0, macOS 15.0, *)
 enum BlahKeychain {
     static let service = "ing.blah.identity.v1"
@@ -64,10 +64,7 @@ struct BlahRestoreKeychain {
     let isAppExtension: Bool
 
     func read(_ key: String) throws -> Data? {
-        if let data = try BlahKeychain.read(key, accessGroup: accessGroup) { return data }
-        guard !isAppExtension, let data = try BlahKeychain.read(key) else { return nil }
-        try write(key, data: data)
-        return data
+        return try BlahKeychain.read(key, accessGroup: accessGroup)
     }
 
     func write(_ key: String, data: Data) throws {
@@ -96,15 +93,15 @@ public enum BlahIdentityError: Error, LocalizedError {
         switch self {
         case .keychain: return "Identity storage is unavailable or access was cancelled."
         case .unavailable: return "Secure Enclave is required to create or recover an identity on this device."
-        case .locked: return "Unlock your identity to continue."
+        case .locked: return "Identity custody is unavailable. Try again."
         case .invalidProfile: return "The identity or DC profile is invalid."
         case .wrongHome: return "This account belongs to another identity or home. Add another account."
         case .staleProfile: return "The profile is older than the saved revision or conflicts with it."
         case .publicationRequired: return "Publish the latest profile at every listed domain, then check publication again."
-        case .duplicate: return "This identity is already saved. Unlock its current copy."
+        case .duplicate: return "This account slot already has an identity. Add another account."
         case .profileUnavailable: return "The profile server could not be reached."
         case .profileVerificationFailed: return "This domain serves an identity profile whose signature or validity could not be verified."
-        case .managementRequired: return "This device does not hold permission to manage the identity."
+        case .managementRequired: return "Enter the recovery words on this device to manage the identity."
         case let .hosting(message): return message
         }
     }

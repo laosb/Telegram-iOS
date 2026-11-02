@@ -5,43 +5,39 @@ There are several things we require from **all developers** for the moment.
 
 ## Blah identity flow
 
-This fork requires iOS 18 or later. **Choose identity** opens the native Identity Manager,
-also available in Settings. Connect to your home DC domain before creating an identity.
-The app embeds no DC list; it discovers each account's home from the domain you enter.
+This fork requires iOS 18 or later. Sign-in offers **Create Account**, **Sign In with
+Recovery Words**, **Sign In with QR Code**, and iCloud Keychain identities. Connect to
+your home DC domain first; the app embeds no DC list. Each account slot has one identity
+and a fresh, non-exportable Secure Enclave P-256 device key for its session.
 The DC publishes its signed profile at `/.well-known/blah/profile.cbor` and advertises a
 plain TCP MTProto endpoint. iOS 18–25 supports Ed25519/P-256 DC profile signatures;
-ML-DSA requires iOS 26. Its identity, database generation and signed version are
-pinned per account; another home or identity requires another account slot. Unbound
-legacy transport sessions require a fresh account.
-On launch, the main app refreshes the home profile. If the domain is unreachable, it keeps
-the saved home only if it still verifies; any returned profile that fails verification or
-is older is rejected. Extensions reuse the saved verified home without contacting the profile domain.
+ML-DSA requires iOS 26. Its identity, database generation and signed version are pinned per
+account. Extensions reuse the saved verified home; the main app refreshes it on launch.
+A failed verification or an older returned home profile is rejected.
 
-Create a name on a Diem profile host, use a domain you host yourself, or import a
-password-encrypted identity file. Shared BlahDiem CBOR/HPKE files containing identity
-recovery authority are accepted; device-only files and JSON backups are unsupported.
-Hosted identities publish automatically after changes and signup; failed publication
-retains the signed revision and can be retried in Identity Manager. For your own domains,
-publish the exported public `profile.cbor` at every listed HTTPS domain with content type
-`application/cbor`, including the updated account number after signup, then sign in again.
-Sign-in first uses the identity domain. Admission email appears only when the DC asks for
-it; signup without email goes straight to the name form. Existing email-code and two-step
-password screens complete the DC's additional factors. Identity Manager also manages
-domains, devices, profile validity and renewal; publish every authority change.
+Create a hosted name or use a domain you host yourself. The app generates 24 BIP39 English
+**recovery words**, shows them in the stock word grid, and verifies three before creating
+the account. These words encode the identity seed and are the only backup. Restoring words
+or an iCloud identity fetches the domain's profile, checks the derived identity and enrolls
+a new hardware device. Hosted publication is automatic; manual domains require uploading
+the public `profile.cbor` at every listed HTTPS domain, including after signup numbering.
+Publication failures retain the exact signed revision for retry in **Settings → Blah Identity**.
+The stock signup name, admission-email and two-step password screens complete sign-in.
 
-Identity custody lives in Keychain independently of chat storage. Native BlahDiem uses
-Secure Enclave P-256 device keys and seals the Ed25519 recovery key to another Secure
-Enclave key. **Unlock with Face ID or Touch ID** is optional; there is no separate identity
-passcode. Encrypted file export/import requires a nonempty backup password with no additional
-length or complexity rules.
-**Sync recovery with iCloud Keychain** is opt-in and synchronizes the recoverable identity
-key and profile, not the hardware device keys. Recovery fetches the latest hosted profile,
-enrolls a fresh Secure Enclave device, and requires publication. Native recovery exports
-are for native recovery; they do not export the hardware device key as a browser identity.
-Custody locks when leaving management, on backgrounding, or after 15 idle minutes;
-continuing sign-in retains it subject to the same idle and background locks.
-Automatic renewal runs only while unlocked. Creation and recovery require real Secure
-Enclave hardware; the simulator has no software-key fallback.
+The seed is sealed to a separate Secure Enclave encryption key, with optional biometric
+access control. Showing recovery words requires device authentication. The optional iCloud
+Keychain copy contains the seed and profile/home metadata; it never contains a device key.
+Logout deletes the slot's local custody and device reference, retaining the iCloud copy.
+Old raw-root custody is discarded and its bound accounts are logged out; there is no file
+import, password custody or migration. Real Secure Enclave hardware is required for creation
+and recovery; the simulator has no software fallback.
+
+QR approvals default to device-only access. **Allow this device to approve sign-ins** also
+transfers the seed. Only seed holders can approve links, renew profiles or manage sessions.
+Devices without the seed can enter recovery words without replacing their session device.
+Session termination publishes a profile without the victims before the stock reset RPC.
+Holders prune exactly the devices the server reports as retired and automatically renew profiles and certificates
+at 80% of their validity while the app runs, subject only to the Secure Enclave access policy.
 
 Every profile domain is a username candidate. Publish the profile at each domain,
 then verify it with the home DC and choose active usernames in Edit Profile.
@@ -67,10 +63,8 @@ swift package --package-path build-system/SwiftPackages resolve
 build-input/bazel-9.2.0-darwin-arm64 mod deps
 ```
 
-Recovery exports use BlahDiem’s `KeyFile` API and the platform PBKDF2 adapter; hardware
-keys remain non-exportable.
 The [package integration tests](build-system/SwiftPackages/Tests/BlahDiemPackageTests.swift)
-exercise profile encoding and sealed-key recovery against the fetched packages:
+exercise profile encoding and sealed-seed recovery against the fetched packages:
 
 ```sh
 swift test --package-path build-system/SwiftPackages
@@ -84,7 +78,7 @@ The Apple backend uses the upstream Swift Crypto package, which delegates to Cry
 on Apple platforms. No WASM is linked into the native app. Build through the repository's
 `build-system/Make/Make.py` workflow
 with the configured Xcode and signing environment. Device validation must cover cancelled
-biometric prompts, lock/background transitions, publication after signup, file recovery,
+biometric prompts, lock/background transitions, publication after signup, recovery-word verification and restoration,
 and iCloud recovery on a second device.
 
 # Creating your Telegram Application

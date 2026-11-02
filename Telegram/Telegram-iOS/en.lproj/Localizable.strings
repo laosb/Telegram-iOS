@@ -17244,26 +17244,17 @@ Error: %8$@";
 "Gift.Delete.Text" = "Do you want to delete this gift?\n\nIt will disappear from your profile and can't be restored.";
 "Gift.Delete.Success" = "Gift Deleted";
 "blah.Login.Title" = "Welcome to Blah";
-"blah.Login.Subtitle" = "Connect to a DC, then choose or create your Blah identity.";
-"blah.Login.Continue" = "Choose identity";
+"blah.Login.Subtitle" = "Your identity, your recovery words.";
 
-"blah.Identity.Title" = "Identity Manager";
+"blah.Identity.Title" = "Blah Identity";
 "blah.Identity.AdmissionEmail" = "Admission email";
 "blah.Identity.Publication" = "Publish the latest public profile at each address below as application/cbor. Publish again after signup adds your account number.";
 "blah.Identity.ExportProfile" = "Export public profile";
-"blah.Identity.ExportBackup" = "Export encrypted identity";
 "blah.Identity.CheckPublication" = "Check publication";
 "blah.Identity.Published" = "The latest profile is published.";
 "blah.Identity.Biometrics" = "Unlock with Face ID or Touch ID";
-"blah.Identity.Sync" = "Sync recovery with iCloud Keychain";
-"blah.Identity.Remove" = "Remove Identity";
-"blah.Identity.RemoveDevice" = "Remove from This Device";
-"blah.Identity.RemoveDeviceCloud" = "Remove from This Device and iCloud";
-"blah.Identity.RemoveCloud" = "Remove from iCloud";
-"blah.Identity.RemoveDeviceNotice" = "Removing this identity from this device also logs out the account using it here.";
-"blah.Identity.RemoveDeviceCloudNotice" = "Removing this identity from this device also logs out the account using it here. Removing it from iCloud also removes it from other devices that restore from iCloud.";
-"blah.Identity.RemoveCloudNotice" = "Removing this identity from iCloud also removes it from other devices that restore from iCloud.";
-"blah.Identity.SyncNotice" = "Syncing stores the recoverable identity key in iCloud Keychain. Secure Enclave device keys stay on this device. Recovery creates a new device and requires publishing its profile.";
+"blah.Identity.Sync" = "Sync Recovery Words with iCloud Keychain";
+"blah.Identity.SyncNotice" = "An optional copy of your recovery seed and profile is stored in iCloud Keychain. Your device key stays on this device.";
 "blah.Identity.AutoRenew" = "Renew automatically while unlocked";
 "blah.Identity.ProfileDays" = "Profile validity (days)";
 "blah.Identity.DeviceDays" = "Device validity (days)";
@@ -17271,37 +17262,23 @@ Error: %8$@";
 "blah.Identity.RemoveDomain" = "Remove domain";
 "blah.Identity.UsernameNotice" = "Every domain is a username candidate. Publish changes at every domain, then request a profile check from your DC. Activate verified domains in Edit Profile.";
 "blah.Identity.AddDomain" = "Add profile domain";
-"blah.Identity.ThisDevice" = "This device";
-"blah.Identity.RevokeDevice" = "Revoke device";
-"blah.Identity.RevokeNotice" = "Revoke this device? Publish the updated profile to apply the change.";
-"blah.Identity.AddDevice" = "Authorize device (Base64 public key)";
-"blah.Identity.Lock" = "Lock identity";
-"blah.Identity.BackupPassword" = "Identity backup password";
-"blah.Identity.BackupNotice" = "Choose a password. Keep it and a current identity file. It is only needed to export or import a backup.";
-"blah.Identity.InvalidFile" = "Choose a valid identity file no larger than 256 KiB.";
-"blah.Identity.ChooseDC" = "Choose a DC domain";
-"blah.Identity.NoSaved" = "Create an identity or import an encrypted identity file to get started.";
 "blah.Identity.AdmissionNotice" = "This DC requires email verification before creating an account. Enter an address to receive an admission code. Your identity domain remains your sign-in identity.";
 "blah.Identity.SigningIn" = "Signing in…";
 "blah.Identity.Working" = "Working…";
-"blah.Identity.FilesSection" = "PROFILE AND BACKUP";
+"blah.Identity.FilesSection" = "Profile Publication";
 "blah.Identity.SecuritySection" = "KEY SECURITY";
 "blah.Identity.RenewalSection" = "RENEWAL";
 "blah.Identity.DomainsSection" = "PROFILE DOMAINS";
-"blah.Identity.DevicesSection" = "DEVICES";
-"blah.Identity.HostedPublication" = "Changes are published to your profile hosting service. Export an encrypted identity file so you can recover your identity on another device.";
+"blah.Identity.HostedPublication" = "Your public profile is published automatically. Save your Recovery Words to recover this identity on another device. An exported public profile cannot restore your identity.";
 "blah.Identity.PublicationPending" = "Your latest profile still needs to be published. Publish it at every listed domain.";
 "blah.Identity.Publish" = "Publish latest profile";
-"blah.Identity.PublishProfile" = "Publish Profile";
-"blah.Identity.CopyDevice" = "Copy this device's public key";
 "blah.Identity.Copied" = "Copied to clipboard.";
-"blah.Identity.InvalidDevice" = "Enter a Base64-encoded device public key.";
 "blah.Identity.InvalidValidity" = "Enter a positive whole number of days. Device certificates must remain valid at least as long as the profile.";
 
 /* Blah device linking (approver). */
 "blah.DeviceLink.Title" = "Link Device";
 "blah.DeviceLink.Confirm" = "Only approve a device you recognize. It will be signed in to this account:";
-"blah.DeviceLink.Transfer" = "Allow this device to manage the identity";
+"blah.DeviceLink.Transfer" = "Allow this device to approve sign-ins";
 "blah.DeviceLink.Approve" = "Approve";
 "blah.DeviceLink.Publish" = "Publish the updated profile at this exact address before linking the device:";
 "blah.DeviceLink.ShareProfile" = "Share Profile File";
@@ -17319,24 +17296,19 @@ Error: %8$@";
 "blah.DeviceLink.Invalid" = "This device-link code is invalid. Scan a new QR code from Blah.";
 
 /* Identity list and Add Identity wizard. */
-"blah.IdentityWizard.Add" = "Add Identity";
-"blah.IdentityWizard.InCloud" = "In iCloud";
-"blah.IdentityWizard.Details" = "Identity Details";
-"blah.IdentityWizard.Unlock" = "Unlock Identity";
+"blah.IdentityWizard.Unlock" = "Open Identity";
 "blah.IdentityWizard.HomeTitle" = "Your home DC";
 "blah.IdentityWizard.HomeText" = "Enter the domain of the DC where your identity will sign in.";
 "blah.IdentityWizard.HomePlaceholder" = "dc.example.com";
 "blah.IdentityWizard.Scan" = "Scan QR Code";
 "blah.IdentityWizard.ScanText" = "Scan a QR code containing your home DC's domain or HTTPS address.";
-"blah.IdentityWizard.Import" = "Import Backup File…";
 "blah.IdentityWizard.DomainTitle" = "Your domain";
 "blah.IdentityWizard.DomainText" = "Enter your full identity domain, including the hosting service if you use one.";
 "blah.IdentityWizard.DomainPlaceholder" = "alice.host.example";
-"blah.IdentityWizard.WrongHome" = "This identity belongs to a different home DC. Go back and choose its home DC.";
-"blah.IdentityWizard.MintTitle" = "Mint your identity";
-"blah.IdentityWizard.MintText" = "Create a new identity for %@ with custody protected by this device's Secure Enclave.";
-"blah.IdentityWizard.Mint" = "Mint";
-"blah.IdentityWizard.Sync" = "Sync identity recovery with iCloud Keychain";
+"blah.IdentityWizard.MintTitle" = "Create Account";
+"blah.IdentityWizard.MintText" = "Create an identity at %@. Next, write down and verify your recovery words.";
+"blah.IdentityWizard.Mint" = "Show Recovery Words";
+"blah.IdentityWizard.Sync" = "Sync Recovery Words with iCloud Keychain";
 "blah.IdentityWizard.FaceID" = "Use Face ID";
 "blah.IdentityWizard.PublishTitle" = "Publish profile";
 "blah.IdentityWizard.PublishText" = "Upload your public profile file to the exact address below as application/cbor, then check that it is available.";
@@ -17347,11 +17319,43 @@ Error: %8$@";
 "blah.IdentityWizard.RetryPublication" = "Retry";
 "blah.IdentityWizard.Refreshing" = "Publication verified. Updating your profile on the DC…";
 "blah.IdentityWizard.RefreshFailed" = "Your profile is published, but the DC could not refresh it: %@";
-"blah.IdentityWizard.ReadyTitle" = "Your identity is ready";
-"blah.IdentityWizard.ReadyText" = "Sign in to add an account, or keep this identity saved for later.";
-"blah.IdentityWizard.SignIn" = "Sign In";
 "blah.IdentityWizard.QRTitle" = "Link this device";
 "blah.IdentityWizard.QRText" = "Open Blah on a signed-in device, go to Settings → Devices → Link Desktop Device, and scan this code.";
 "blah.IdentityWizard.Retry" = "Try Again";
 "blah.IdentityWizard.Interrupted" = "The operation was interrupted. Continue to try again.";
-"blah.IdentityWizard.Device" = "Device";
+
+"blah.Login.Create" = "Create Account";
+
+"blah.Login.Words" = "Sign In with Recovery Words";
+
+"blah.Login.QR" = "Sign In with QR Code";
+
+"blah.Login.Cloud" = "Continue as %@";
+
+"blah.Identity.RecoveryWords" = "Recovery Words";
+
+"blah.Identity.EnterWords" = "Enter Recovery Words";
+
+"blah.Identity.EnterWordsText" = "Enter your 24 recovery words. You can also paste the whole phrase.";
+
+"blah.Identity.WordsNotice" = "Write down these 24 recovery words in order and keep them somewhere safe. Anyone with these words can control your identity.";
+
+"blah.Identity.RemoveWords" = "Remove Recovery Words from This Device";
+
+"blah.Identity.RemoveWordsNotice" = "This device will keep its session but will no longer approve sign-ins, manage sessions or renew your identity. Keep your recovery words somewhere safe. The iCloud Keychain copy is kept.";
+
+"blah.Identity.HolderNotice" = "Only devices with the recovery words can approve sign-ins and manage sessions.";
+
+"blah.Identity.AuthenticateWords" = "Authenticate to view your recovery words.";
+
+"blah.Identity.TerminationFailed" = "The session could not be terminated. Check that the updated profile is published, then try again.";
+
+
+"blah.IdentityWizard.NameTaken" = "This address already has an identity. Sign in with its recovery words or QR code.";
+
+"blah.Identity.InvalidWords" = "Enter exactly 24 recovery words in order and check their spelling and checksum.";
+"blah.Identity.VerifyWords" = "Check that you saved your recovery words.\nEnter words **%1$@**, **%2$@** and **%3$@**.";
+
+"blah.IdentityWizard.ResumeTitle" = "Unfinished Sign-In";
+"blah.IdentityWizard.ResumeText" = "Continue signing in as %@, or start again with your selected sign-in option. Starting again deletes this slot’s local recovery words and device key. Its iCloud copy is kept.";
+"blah.IdentityWizard.Restart" = "Start Again";

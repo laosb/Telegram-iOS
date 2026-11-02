@@ -1,6 +1,5 @@
 import Foundation
 import UIKit
-import UniformTypeIdentifiers
 import AsyncDisplayKit
 import AccountContext
 import BlahIdentity
@@ -12,36 +11,44 @@ import QrCodeUI
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
+import WalletWordsScreen
+import WalletImportScreen
 
-enum IdentityWizardStart {
-    case home(legacyID: String?)
-    case link(domain: String, homeDomain: String)
+public enum BlahAuthorizationAction {
+    case create
+    case words
+    case qr
+    case cloud(id: String)
 }
 
-enum IdentityWizardResult {
+private enum IdentityWizardResult {
     case dismissed
     case saved(String)
-    case details(String)
-    case handoff(BlahIdentitySignInAction)
     case signedIn
 }
 
-private enum IdentityWizardQRRoute {
-    case saved(String)
-    case replaceAccount
-    case connected
+public func blahHomeController(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData,
+    completed: @escaping (String) -> Void) -> ViewController {
+    let coordinator = IdentityWizardCoordinator(network: network, sharedContext: sharedContext, presentationData: presentationData,
+        isLogin: false, completeDeviceLink: nil, cancelSignIn: nil, completed: { _ in })
+    let host = identityWizardHost(coordinator: coordinator, presentationData: presentationData)
+    coordinator.homeSelected = { completed($0.domain) }
+    coordinator.showHome(value: "")
+    return host
 }
 
-func identityWizardController(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData,
-    start: IdentityWizardStart, homeDomain: String?, isLogin: Bool,
-    completeDeviceLink: ((BlahDeviceLinkState, @escaping (String?) -> Void) -> Void)?, cancelSignIn: (() -> Void)?,
-    completed: @escaping (IdentityWizardResult) -> Void) -> ViewController {
+public func blahAuthorizationController(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData,
+    action: BlahAuthorizationAction, signIn: @escaping (String) -> Void,
+    cancelSignIn: @escaping () -> Void,
+    completeDeviceLink: @escaping (BlahDeviceLinkState, @escaping (String?) -> Void) -> Void) -> ViewController {
     let coordinator = IdentityWizardCoordinator(network: network, sharedContext: sharedContext, presentationData: presentationData,
-        isLogin: isLogin, completeDeviceLink: completeDeviceLink, cancelSignIn: cancelSignIn, completed: completed)
+        isLogin: true, signIn: signIn, completeDeviceLink: completeDeviceLink, cancelSignIn: cancelSignIn, completed: { _ in })
     let host = identityWizardHost(coordinator: coordinator, presentationData: presentationData)
-    switch start {
-    case let .home(legacyID): coordinator.showHome(value: homeDomain ?? "", legacyID: legacyID)
-    case let .link(domain, homeDomain): coordinator.showQR(domain: domain, homeDomain: homeDomain)
+    coordinator.action = action
+    Task { @MainActor [weak coordinator] in
+        if let home = try? await BlahIdentityStore.shared.home(slot: network.blahIdentitySlot) {
+            coordinator?.start(home: home)
+        } else { coordinator?.showHome(value: "") }
     }
     return host
 }
@@ -150,7 +157,6 @@ private final class IdentityWizardPageController: ViewController {
     private let presentationData: PresentationData
     var appeared: (() -> Void)?
     var disappeared: (() -> Void)?
-    var custodyBaseline: Set<String>?
     var node: BlahIdentityWizardNode { displayNode as! BlahIdentityWizardNode }
 
     init(owner: IdentityWizardCoordinator, page: IdentityWizardPage, presentationData: PresentationData) {
@@ -194,7 +200,7 @@ private final class IdentityWizardPageController: ViewController {
     @objc private func cancelPressed() { owner.cancel() }
 }
 
-private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegate {
+private final class IdentityWizardCoordinator: NSObject {
     let publicationOnly: Bool
     private let refreshAfterPublication: Bool
     weak var navigation: NavigationController?
@@ -202,6 +208,9 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
     private let network: Network
     private let sharedContext: SharedAccountContext
     private let presentationData: PresentationData
+    var action: BlahAuthorizationAction = .create
+    var homeSelected: ((BlahHome) -> Void)?
+    private let signIn: ((String) -> Void)?
     private let isLogin: Bool
     private let completeDeviceLink: ((BlahDeviceLinkState, @escaping (String?) -> Void) -> Void)?
     private let cancelSignIn: (() -> Void)?
@@ -216,19 +225,18 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
     private let imageDisposable = MetaDisposable()
     private let accountsDisposable = MetaDisposable()
     private var expiration: DispatchWorkItem?
-    private var importHome: BlahHome?
-    private weak var importPage: IdentityWizardPageController?
     private var shareFolders: [URL] = []
     private var strings: PresentationStrings { presentationData.strings }
     private var current: IdentityWizardPageController? { navigation?.viewControllers.last as? IdentityWizardPageController }
 
-    init(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData, isLogin: Bool, publicationOnly: Bool = false, refreshAfterPublication: Bool = true,
+    init(network: Network, sharedContext: SharedAccountContext, presentationData: PresentationData, isLogin: Bool, signIn: ((String) -> Void)? = nil, publicationOnly: Bool = false, refreshAfterPublication: Bool = true,
         completeDeviceLink: ((BlahDeviceLinkState, @escaping (String?) -> Void) -> Void)?, cancelSignIn: (() -> Void)?,
         completed: @escaping (IdentityWizardResult) -> Void) {
         self.network = network
         self.sharedContext = sharedContext
         self.presentationData = presentationData
         self.isLogin = isLogin
+        self.signIn = signIn
         self.publicationOnly = publicationOnly
         self.refreshAfterPublication = refreshAfterPublication
         self.completeDeviceLink = completeDeviceLink
@@ -278,7 +286,6 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
 
     func cancelWork() {
         stopWork()
-        if !publicationOnly { Task { await BlahIdentityStore.shared.lock() } }
     }
 
     func cancel() {
@@ -293,11 +300,7 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
         stopWork(preserveSignIn: preserveIdentity)
         current?.view.endEditing(true)
         if dismiss { host?.dismiss() }
-        // Cleanup survives removal/deinit; notify once, after locking, before another selection unlocks.
-        Task { @MainActor [completed] in
-            if !preserveIdentity { await BlahIdentityStore.shared.lock() }
-            completed(result)
-        }
+        completed(result)
     }
 
     private func push(_ model: IdentityWizardPage, replacing: Bool = false) -> IdentityWizardPageController {
@@ -311,27 +314,14 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
         return page
     }
 
-    private func run<T>(on page: IdentityWizardPageController, savingIdentity: Bool = false,
+    private func run<T>(on page: IdentityWizardPageController,
         work: @escaping () async throws -> T, completed: @escaping (T) -> Void) {
         guard !page.node.busy, !finished else { return }
         page.node.busy = true
         page.node.setStatus(nil)
         let generation = self.generation
         task = Task { @MainActor [weak self, weak page] in
-            var previousIDs: Set<String>?
             do {
-                if savingIdentity {
-                    let saved = try await BlahIdentityStore.shared.list()
-                    guard let self, let page, !Task.isCancelled, self.generation == generation, !self.finished else { return }
-                    // Keep the baseline across background cancellation and back navigation.
-                    if let baseline = page.custodyBaseline, let identity = saved.first(where: { !baseline.contains($0.id) }) {
-                        self.finish(.details(identity.id))
-                        return
-                    }
-                    previousIDs = Set(saved.map { $0.id })
-                    page.custodyBaseline = previousIDs
-                }
-                try Task.checkCancellation()
                 let result = try await work()
                 try Task.checkCancellation()
                 guard let self, let page, self.generation == generation, !self.finished else { return }
@@ -339,59 +329,90 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
                 completed(result)
             } catch {
                 guard let self, let page, !Task.isCancelled, self.generation == generation else { return }
-                if let previousIDs, let saved = try? await BlahIdentityStore.shared.list(),
-                    let identity = saved.first(where: { !previousIDs.contains($0.id) }) {
-                    guard !Task.isCancelled, self.generation == generation, !self.finished else { return }
-                    self.finish(.details(identity.id))
-                    return
-                }
-                guard !Task.isCancelled, self.generation == generation, !self.finished else { return }
                 page.node.busy = false
-                if page.page.qr { page.node.primaryHidden = false }
-                page.node.setStatus(error.localizedDescription, error: true)
+                page.node.primaryHidden = false
+                page.node.setStatus(blahIdentityErrorDescription(error), error: true)
+                // Signing can succeed before a publication failure. Keep the exact revision retryable.
+                if let pending = try? await BlahIdentityStore.shared.pendingPublication(slot: self.network.blahIdentitySlot) {
+                    self.showPublication(id: pending.id, profile: pending.profile, url: pending.url, hosted: pending.hostingDomain != nil)
+                }
             }
         }
     }
 
-    func showHome(value: String, legacyID: String?) {
+    func showHome(value: String) {
         let page = push(IdentityWizardPage(title: strings.blah_IdentityWizard_HomeTitle, text: strings.blah_IdentityWizard_HomeText,
             placeholder: strings.blah_IdentityWizard_HomePlaceholder, value: value, primary: strings.Login_Continue,
-            secondary: legacyID == nil ? strings.blah_IdentityWizard_Import : nil, auxiliary: strings.blah_IdentityWizard_Scan))
+            auxiliary: strings.blah_IdentityWizard_Scan))
         page.node.primary = { [weak self, weak page] in
             guard let self, let page else { return }
             let input = page.node.value
-            self.run(on: page, work: {
-                let home = try await BlahIdentityStore.shared.discoverHome(input)
-                if let legacyID { try await BlahIdentityStore.shared.setHomeDomain(id: legacyID, home: home) }
-                return home
-            }, completed: { [weak self] home in
-                if let legacyID { self?.finish(.saved(legacyID)) }
-                else { self?.showDomain(home: home) }
+            self.run(on: page, work: { [network = self.network] in
+                try await network.connectBlahHome(domain: input)
+                return try await BlahIdentityStore.shared.home(slot: network.blahIdentitySlot)!
+            }, completed: { [weak self, weak page] home in
+                guard self != nil, page != nil else { return }
+                Task { @MainActor [weak self, weak page] in
+                    guard let self, let page else { return }
+                    if let homeSelected = self.homeSelected {
+                        homeSelected(home)
+                        self.finish(.dismissed)
+                        return
+                    }
+                    self.resumeOrContinue(home: home, on: page)
+                }
             })
         }
         page.node.auxiliary = { [weak self, weak page] in
             guard let self, let page else { return }
-            page.view.endEditing(true)
             let scanner = QrCodeScanScreen(sharedContext: self.sharedContext, info: self.strings.blah_IdentityWizard_ScanText,
                 validate: { (try? BlahProfileHost.homeDomain($0)) != nil })
             scanner.completion = { [weak page, weak scanner] value in
-                if let value, let domain = try? BlahProfileHost.homeDomain(value) { page?.node.value = domain.name }
-                if value != nil { scanner?.dismissAnimated() }
+                if let value, let domain = try? BlahProfileHost.homeDomain(value) { page?.node.value = domain.name; scanner?.dismissAnimated() }
             }
             page.present(scanner, in: .window(.root))
         }
-        page.node.secondary = { [weak self, weak page] in
+    }
+
+    func start(home: BlahHome) {
+        let page = push(IdentityWizardPage(title: strings.blah_Login_Title, text: strings.blah_Identity_Working,
+            primary: strings.blah_IdentityWizard_Retry))
+        page.node.primary = { [weak self, weak page] in
             guard let self, let page else { return }
-            let input = page.node.value
-            self.run(on: page, work: { try await BlahIdentityStore.shared.discoverHome(input) }, completed: { [weak self, weak page] home in
-                guard let self, let page else { return }
-                self.importHome = home
-                self.importPage = page
-                page.view.endEditing(true)
-                let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
-                picker.delegate = self
-                page.present(picker, animated: true)
-            })
+            self.resumeOrContinue(home: home, on: page)
+        }
+        resumeOrContinue(home: home, on: page)
+    }
+
+    private func resumeOrContinue(home: BlahHome, on page: IdentityWizardPageController) {
+        run(on: page, work: { [network] in try await BlahIdentityStore.shared.identity(slot: network.blahIdentitySlot) }, completed: { [weak self, weak page] existing in
+            guard let self, let page else { return }
+            if let existing {
+                let resume = self.push(IdentityWizardPage(title: self.strings.blah_IdentityWizard_ResumeTitle,
+                    text: self.strings.blah_IdentityWizard_ResumeText(existing.domain).string,
+                    primary: self.strings.Login_Continue, auxiliary: self.strings.blah_IdentityWizard_Restart))
+                resume.node.primary = { [weak self] in self?.ready(id: existing.id) }
+                resume.node.auxiliary = { [weak self, weak resume] in
+                    guard let self, let resume else { return }
+                    self.run(on: resume, work: { [network = self.network] in
+                        try await network.restartBlahAuthorization()
+                    }, completed: { [weak self, weak resume] home in
+                        guard let self, let resume else { return }
+                        self.continueFromHome(home, on: resume)
+                    })
+                }
+            } else { self.continueFromHome(home, on: page) }
+        })
+    }
+
+    private func continueFromHome(_ home: BlahHome, on page: IdentityWizardPageController) {
+        switch action {
+        case let .cloud(id):
+            run(on: page, work: { [network] in
+                try await BlahIdentityStore.shared.restoreCloud(id: id, slot: network.blahIdentitySlot, biometrics: false)
+            }, completed: { [weak self] identity in self?.ready(id: identity.id) })
+        case .qr: showQR(domain: nil, homeDomain: home.domain)
+        default: showDomain(home: home)
         }
     }
 
@@ -401,18 +422,33 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
         page.node.primary = { [weak self, weak page] in
             guard let self, let page else { return }
             let domain = page.node.value
-            self.run(on: page, work: { try await BlahIdentityStore.shared.probe(domain: domain, home: home) }, completed: { [weak self, weak page] result in
-                guard let self else { return }
-                switch result {
-                case let .available(domain): self.showMint(domain: domain, home: home)
-                case let .saved(id): self.finish(.saved(id))
-                case let .existing(domain, _, sameHome):
-                    guard sameHome else { page?.node.setStatus(self.strings.blah_IdentityWizard_WrongHome, error: true); return }
-                    if self.isLogin { self.showQR(domain: domain, homeDomain: home.domain) }
-                    else { self.finish(.handoff(.link(domain: domain, homeDomain: home.domain))) }
-                }
-            })
+            switch self.action {
+            case .words:
+                do { self.showWordsEntry(domain: try BlahProfileHost.domain(domain).name, on: page) }
+                catch { page.node.setStatus(blahIdentityErrorDescription(error), error: true) }
+            case .qr:
+                self.showQR(domain: domain, homeDomain: home.domain)
+            case .create, .cloud:
+                self.run(on: page, work: { try await BlahIdentityStore.shared.probe(domain: domain, home: home) }, completed: { [weak self, weak page] result in
+                    guard let self else { return }
+                    switch result {
+                    case let .available(domain): self.showMint(domain: domain, home: home)
+                    case .existing: page?.node.setStatus(self.strings.blah_IdentityWizard_NameTaken, error: true)
+                    }
+                })
+            }
         }
+    }
+
+    private func showWordsEntry(domain: String, on page: IdentityWizardPageController) {
+        let input = WalletRecoveryWordsInput(validate: { (try? IdentitySeed(phrase: $0.joined(separator: " "))) != nil }, completed: { [weak self, weak page] words in
+            guard let self, let page else { return }
+            _ = self.navigation?.popViewController(animated: false)
+            self.run(on: page, work: { [network = self.network] in
+                try await BlahIdentityStore.shared.restoreWords(words, domain: domain, slot: network.blahIdentitySlot)
+            }, completed: { [weak self] identity in self?.ready(id: identity.id) })
+        })
+        navigation?.pushViewController(WalletImportScreen(sharedContext: sharedContext, recovery: input))
     }
 
     private func showMint(domain: String, home: BlahHome) {
@@ -420,23 +456,39 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
             text: strings.blah_IdentityWizard_MintText(domain).string, primary: strings.blah_IdentityWizard_Mint, mintOptions: true))
         page.node.primary = { [weak self, weak page] in
             guard let self, let page else { return }
-            let biometrics = page.node.biometrics
-            let sync = page.node.sync
-            self.run(on: page, savingIdentity: true, work: { try await BlahIdentityStore.shared.mint(domain: domain, home: home, biometrics: biometrics, sync: sync) }, completed: { [weak self] result in
-                guard let self else { return }
-                switch result.publication {
-                case .published: self.ready(id: result.id)
-                case let .manual(profile, url): self.showPublication(id: result.id, profile: profile, url: url)
-                }
+            self.run(on: page, work: { try await BlahIdentityStore.shared.generateWords() }, completed: { [weak self, weak page] words in
+                guard let self, let page else { return }
+                let screen = WalletWordsScreen(sharedContext: self.sharedContext, words: words,
+                    verification: { [sharedContext = self.sharedContext] completed in
+                        WalletImportScreen(sharedContext: sharedContext,
+                            recovery: WalletRecoveryWordsInput(validate: { _ in true }, completed: { _ in }), verifying: words, completion: completed)
+                    }, completion: { [weak self, weak page] in
+                        guard let self, let page else { return }
+                        let biometrics = page.node.biometrics
+                        let sync = page.node.sync
+                        self.run(on: page, work: { [network = self.network] in
+                            try await BlahIdentityStore.shared.mint(words: words, domain: domain, slot: network.blahIdentitySlot,
+                                home: home, biometrics: biometrics, sync: sync)
+                        }, completed: { [weak self] result in
+                            switch result.publication {
+                            case .published: self?.ready(id: result.id)
+                            case let .manual(profile, url): self?.showPublication(id: result.id, profile: profile, url: url)
+                            }
+                        })
+                    })
+                self.navigation?.pushViewController(screen)
             })
         }
     }
 
-    private func showPublication(id: String, profile: Data, url: String) {
-        let page = publicationPage(profile: profile, url: url)
+    private func showPublication(id: String, profile: Data, url: String, hosted: Bool = false) {
+        let page = publicationPage(profile: profile, url: url, hosted: hosted)
         page.node.primary = { [weak self, weak page] in
             guard let self, let page else { return }
-            self.run(on: page, work: { try await BlahIdentityStore.shared.confirmPublication(id: id) }, completed: { [weak self] in self?.ready(id: id) })
+            self.run(on: page, work: {
+                if hosted { try await BlahIdentityStore.shared.retryPublication(slot: self.network.blahIdentitySlot) }
+                else { try await BlahIdentityStore.shared.confirmPublication(slot: self.network.blahIdentitySlot) }
+            }, completed: { [weak self] in self?.ready(id: id) })
         }
     }
 
@@ -458,11 +510,11 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
             page.node.primary = { [weak self, weak page] in
                 guard let self, let page else { return }
                 self.run(on: page, work: { () async throws -> BlahPendingPublication? in
-                    if let current = try await BlahIdentityStore.shared.pendingPublication(id: pending.id), current.profile != pending.profile {
+                    if let current = try await BlahIdentityStore.shared.pendingPublication(slot: self.network.blahIdentitySlot), current.profile != pending.profile {
                         return current
                     }
-                    if pending.hostingDomain != nil { try await BlahIdentityStore.shared.retryPublication(id: pending.id) }
-                    else { try await BlahIdentityStore.shared.confirmPublication(id: pending.id) }
+                    if pending.hostingDomain != nil { try await BlahIdentityStore.shared.retryPublication(slot: self.network.blahIdentitySlot) }
+                    else { try await BlahIdentityStore.shared.confirmPublication(slot: self.network.blahIdentitySlot) }
                     return nil
                 }, completed: { [weak self, weak page] renewed in
                     guard let self, let page else { return }
@@ -485,7 +537,7 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
     private func refreshPublication(on page: IdentityWizardPageController, id: String, allowUnlock: Bool) {
         run(on: page, work: { [self] () async throws -> BlahPendingPublication? in
             if !refreshAfterPublication {
-                return try await BlahIdentityStore.shared.pendingPublication(id: id)
+                return try await BlahIdentityStore.shared.pendingPublication(slot: network.blahIdentitySlot)
             }
             do {
                 return try await refreshIdentityPublication(network: network, id: id, allowUnlock: allowUnlock)
@@ -501,14 +553,23 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
     }
 
     private func ready(id: String) {
-        if isLogin { finish(.saved(id)); return }
-        let page = push(IdentityWizardPage(title: strings.blah_IdentityWizard_ReadyTitle, text: strings.blah_IdentityWizard_ReadyText,
-            primary: strings.blah_IdentityWizard_SignIn, secondary: strings.Common_Done))
-        page.node.primary = { [weak self] in self?.finish(.handoff(.saved(id: id))) }
-        page.node.secondary = { [weak self] in self?.finish(.dismissed) }
+        guard isLogin else { finish(.saved(id)); return }
+        guard let page = current else { return }
+        run(on: page, work: { [network] in try await BlahIdentityStore.shared.pendingPublication(slot: network.blahIdentitySlot) }, completed: { [weak self, weak page] pending in
+            guard let self, let page else { return }
+            if let pending {
+                self.showPublication(id: pending.id, profile: pending.profile, url: pending.url, hosted: pending.hostingDomain != nil)
+            } else {
+                self.run(on: page, work: { [network = self.network] in try await BlahIdentityStore.shared.bind(slot: network.blahIdentitySlot) }, completed: { [weak self] domain in
+                    guard let self else { return }
+                    self.signIn?(domain)
+                    self.finish(.signedIn)
+                })
+            }
+        })
     }
 
-    func showQR(domain: String, homeDomain: String) {
+    func showQR(domain: String?, homeDomain: String) {
         let page = push(IdentityWizardPage(title: strings.blah_IdentityWizard_QRTitle, text: strings.blah_IdentityWizard_QRText,
             primary: strings.blah_IdentityWizard_Retry, qr: true))
         page.node.primary = { [weak self, weak page] in
@@ -522,26 +583,14 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
         page.disappeared = { [weak self] in self?.stopWork() }
     }
 
-    private func startQR(on page: IdentityWizardPageController, domain: String, homeDomain: String) {
+    private func startQR(on page: IdentityWizardPageController, domain: String?, homeDomain: String) {
         stopWork()
         page.node.primaryHidden = true
         page.node.setStatus(strings.blah_Identity_Working)
-        run(on: page, work: { [network] () async throws -> IdentityWizardQRRoute in
-            // Installation can commit just before cancellation or a completion RPC failure.
-            if let id = try await BlahIdentityStore.shared.savedIdentityID(domain: domain) { return .saved(id) }
-            guard try await BlahIdentityStore.shared.canUseSlot(slot: network.blahIdentitySlot, homeDomain: homeDomain, identityID: nil) else {
-                return .replaceAccount
-            }
-            try Task.checkCancellation()
+        run(on: page, work: { [network] in
             try await network.connectBlahHome(domain: homeDomain)
-            return .connected
-        }, completed: { [weak self, weak page] route in
+        }, completed: { [weak self, weak page] in
             guard let self, let page else { return }
-            switch route {
-            case let .saved(id): self.finish(.saved(id)); return
-            case .replaceAccount: self.finish(.handoff(.link(domain: domain, homeDomain: homeDomain))); return
-            case .connected: break
-            }
             let generation = self.generation
             self.accountsDisposable.set((self.sharedContext.activeAccountContexts |> take(1) |> deliverOnMainQueue).start(next: { [weak self, weak page] accounts in
                 guard let self, let page, self.generation == generation else { return }
@@ -602,29 +651,6 @@ private final class IdentityWizardCoordinator: NSObject, UIDocumentPickerDelegat
             stopWork()
             page.node.setStatus(error, error: true)
         }
-    }
-
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first, let home = importHome, let page = importPage else { return }
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 262144,
-            let data = try? Data(contentsOf: url) else { page.node.setStatus(strings.blah_Identity_InvalidFile, error: true); return }
-        let alert = UIAlertController(title: strings.blah_Identity_BackupPassword, message: strings.blah_Identity_BackupNotice, preferredStyle: .alert)
-        alert.addTextField { field in
-            field.isSecureTextEntry = true
-            field.autocapitalizationType = .none
-            field.autocorrectionType = .no
-            field.accessibilityLabel = self.strings.blah_Identity_BackupPassword
-        }
-        alert.addAction(UIAlertAction(title: strings.Common_Cancel, style: .cancel))
-        alert.addAction(UIAlertAction(title: strings.Login_Continue, style: .default) { [weak self, weak page, weak alert] _ in
-            guard let self, let page else { return }
-            let password = alert?.textFields?.first?.text ?? ""
-            self.run(on: page, savingIdentity: true, work: { try await BlahIdentityStore.shared.importRecovery(data, password: password, home: home, biometrics: false) },
-                completed: { [weak self] id in self?.ready(id: id) })
-        })
-        page.present(alert, animated: true)
     }
 
     private func share(_ data: Data, from page: IdentityWizardPageController) {

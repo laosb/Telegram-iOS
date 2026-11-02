@@ -1,4 +1,6 @@
 import Foundation
+import BlahIdentity
+import BlahIdentityUI
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -32,10 +34,17 @@ protocol AuthorizationPhoneEntryNode: AnyObject {
 }
 
 final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNode {
+    private let strings: PresentationStrings
+    private let theme: PresentationTheme
+    private(set) var homeConnected = false
     private let logoNode = ASImageNode()
     private let titleNode = ImmediateTextNode()
     private let noticeNode = ImmediateTextNode()
     private let proceedNode: SolidRoundedButtonNode
+    private let scrollNode = ASDisplayNode(viewBlock: { UIScrollView() })
+    private var actionNodes: [SolidRoundedButtonNode] = []
+    private var validLayout: (ContainerViewLayout, CGFloat)?
+    var action: ((BlahAuthorizationAction) -> Void)?
     private let debugAction: () -> Void
 
     var accountUpdated: ((UnauthorizedAccount) -> Void)?
@@ -70,8 +79,10 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
     }
 
     init(strings: PresentationStrings, theme: PresentationTheme, debugAction: @escaping () -> Void) {
+        self.strings = strings
+        self.theme = theme
         self.debugAction = debugAction
-        self.proceedNode = SolidRoundedButtonNode(title: strings.blah_Login_Continue, theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 25.0)
+        self.proceedNode = SolidRoundedButtonNode(title: strings.Login_Continue, theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 25.0)
         super.init()
 
         self.setViewBlock({ UITracingLayerView() })
@@ -85,7 +96,7 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         self.titleNode.isAccessibilityElement = true
         self.titleNode.accessibilityLabel = strings.blah_Login_Title
         self.titleNode.accessibilityTraits = .header
-        self.noticeNode.attributedText = NSAttributedString(string: strings.blah_Login_Subtitle, font: Font.regular(17.0), textColor: theme.list.itemPrimaryTextColor, paragraphAlignment: .center)
+        self.noticeNode.attributedText = NSAttributedString(string: strings.blah_IdentityWizard_HomeText, font: Font.regular(17.0), textColor: theme.list.itemPrimaryTextColor, paragraphAlignment: .center)
         self.noticeNode.maximumNumberOfLines = 0
         self.noticeNode.isAccessibilityElement = true
         self.noticeNode.accessibilityLabel = strings.blah_Login_Subtitle
@@ -95,9 +106,43 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
         self.proceedNode.accessibilityIdentifier = "Auth.PhoneEntry.ContinueButton"
         self.proceedNode.pressed = { [weak self] in self?.submit() }
 
+        self.addSubnode(self.scrollNode)
         for node in [self.logoNode, self.titleNode, self.noticeNode, self.proceedNode] as [ASDisplayNode] {
-            self.addSubnode(node)
+            self.scrollNode.addSubnode(node)
         }
+        let scroll = self.scrollNode.view as! UIScrollView
+        scroll.contentInsetAdjustmentBehavior = .never
+        func button(_ title: String, action: BlahAuthorizationAction) {
+            let node = SolidRoundedButtonNode(title: title, theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 25.0)
+            node.pressed = { [weak self] in guard let self, !self.inProgress else { return }; self.action?(action) }
+            self.actionNodes.append(node)
+            self.scrollNode.addSubnode(node)
+        }
+        button(strings.blah_Login_Words, action: .words)
+        button(strings.blah_Login_QR, action: .qr)
+        self.actionNodes.forEach { $0.isHidden = true }
+        Task { @MainActor [weak self] in
+            let identities = (try? await BlahIdentityStore.shared.cloudIdentities()) ?? []
+            guard let self else { return }
+            for identity in identities {
+                let node = SolidRoundedButtonNode(title: strings.blah_Login_Cloud(identity.domain).string,
+                    theme: SolidRoundedButtonTheme(theme: theme), glass: false, height: 50.0, cornerRadius: 25.0)
+                node.pressed = { [weak self] in guard let self, !self.inProgress else { return }; self.action?(.cloud(id: identity.id)) }
+                node.isHidden = !self.homeConnected
+                self.actionNodes.append(node)
+                self.scrollNode.addSubnode(node)
+            }
+            if let (layout, height) = self.validLayout { self.containerLayoutUpdated(layout, navigationBarHeight: height, transition: .immediate) }
+        }
+    }
+
+    func setHome(_ domain: String) {
+        self.homeConnected = true
+        self.proceedNode.title = self.strings.blah_Login_Create
+        self.noticeNode.attributedText = NSAttributedString(string: domain, font: Font.regular(17.0), textColor: self.theme.list.itemPrimaryTextColor, paragraphAlignment: .center)
+        self.noticeNode.accessibilityLabel = domain
+        self.actionNodes.forEach { $0.isHidden = false }
+        if let (layout, height) = self.validLayout { self.containerLayoutUpdated(layout, navigationBarHeight: height, transition: .immediate) }
     }
 
     override func didLoad() {
@@ -129,26 +174,26 @@ final class BlahAuthorizationEntryNode: ASDisplayNode, AuthorizationPhoneEntryNo
     func animateIn(buttonFrame: CGRect, buttonTitle: String, animationSnapshot: UIView, textSnapshot: UIView) {}
 
     func containerLayoutUpdated(_ layout: ContainerViewLayout, navigationBarHeight: CGFloat, transition: ContainedViewLayoutTransition) {
-        let insets = layout.insets(options: [])
+        self.validLayout = (layout, navigationBarHeight)
         let top = max(navigationBarHeight, layout.statusBarHeight ?? 0.0)
-        let bottom = max(insets.bottom, layout.inputHeight ?? 0.0)
+        transition.updateFrame(node: self.scrollNode, frame: CGRect(x: 0, y: top, width: layout.size.width, height: layout.size.height - top))
         let width = min(430.0, layout.size.width - layout.safeInsets.left - layout.safeInsets.right) - 48.0
-        let availableSize = CGSize(width: width, height: .greatestFiniteMagnitude)
-        let titleSize = self.titleNode.updateLayout(availableSize)
-        let noticeSize = self.noticeNode.updateLayout(availableSize)
-        let buttonHeight = self.proceedNode.updateLayout(width: width, transition: transition)
-        let buttonY = layout.size.height - bottom - buttonHeight - 24.0
-        transition.updateFrame(node: self.proceedNode, frame: CGRect(x: floorToScreenPixels((layout.size.width - width) / 2.0), y: buttonY, width: width, height: buttonHeight))
-
-        var items: [AuthorizationLayoutItem] = []
-        let showLogo = buttonY - top > titleSize.height + noticeSize.height + 190.0
-        self.logoNode.isHidden = !showLogo
-        if showLogo {
-            items.append(AuthorizationLayoutItem(node: self.logoNode, size: CGSize(width: 100.0, height: 100.0), spacingBefore: AuthorizationLayoutItemSpacing(weight: 10.0, maxValue: 10.0), spacingAfter: AuthorizationLayoutItemSpacing(weight: 0.0, maxValue: 0.0)))
+        let x = floorToScreenPixels((layout.size.width - width) / 2.0)
+        var y: CGFloat = 24
+        let available = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let titleSize = self.titleNode.updateLayout(available)
+        let noticeSize = self.noticeNode.updateLayout(available)
+        transition.updateFrame(node: self.logoNode, frame: CGRect(x: floor((layout.size.width - 100) / 2), y: y, width: 100, height: 100))
+        y += 118
+        for (node, size) in [(self.titleNode, titleSize), (self.noticeNode, noticeSize)] {
+            transition.updateFrame(node: node, frame: CGRect(x: x, y: y, width: width, height: size.height))
+            y += size.height + 18
         }
-        for (node, size, spacing) in [(self.titleNode as ASDisplayNode, titleSize, CGFloat(18.0)), (self.noticeNode as ASDisplayNode, noticeSize, CGFloat(18.0))] {
-            items.append(AuthorizationLayoutItem(node: node, size: size, spacingBefore: AuthorizationLayoutItemSpacing(weight: spacing, maxValue: spacing), spacingAfter: AuthorizationLayoutItemSpacing(weight: 0.0, maxValue: 0.0)))
+        for node in [self.proceedNode] + (self.homeConnected ? self.actionNodes : []) {
+            let height = node.updateLayout(width: width, transition: transition)
+            transition.updateFrame(node: node, frame: CGRect(x: x, y: y, width: width, height: height))
+            y += height + 12
         }
-        let _ = layoutAuthorizationItems(bounds: CGRect(x: 0.0, y: top, width: layout.size.width, height: max(0.0, buttonY - top - 16.0)), items: items, transition: transition, failIfDoesNotFit: false)
+        (self.scrollNode.view as! UIScrollView).contentSize = CGSize(width: layout.size.width, height: y + layout.safeInsets.bottom + 24)
     }
 }

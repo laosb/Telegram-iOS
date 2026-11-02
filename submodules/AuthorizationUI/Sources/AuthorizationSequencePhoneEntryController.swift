@@ -1,4 +1,5 @@
 import BlahIdentityUI
+import BlahIdentity
 import Foundation
 import UIKit
 import Display
@@ -159,6 +160,14 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
             self.displayNode = BlahAuthorizationEntryNode(strings: self.presentationData.strings, theme: self.presentationData.theme, debugAction: debugAction)
         } else {
             self.displayNode = AuthorizationSequencePhoneEntryControllerNode(sharedContext: self.sharedContext, account: self.account, strings: self.presentationData.strings, theme: self.presentationData.theme, debugAction: debugAction, hasOtherAccounts: self.otherAccountPhoneNumbers.0 != nil)
+        }
+        if let node = self.displayNode as? BlahAuthorizationEntryNode {
+            node.action = { [weak self] action in self?.openBlahAuthorization(action: action) }
+            if let account = self.account {
+                Task { @MainActor [weak node] in
+                    if let home = try? await BlahIdentityStore.shared.home(slot: account.network.blahIdentitySlot) { node?.setHome(home.domain) }
+                }
+            }
         }
         self.controllerNode.accountUpdated = { [weak self] account in
             guard let strongSelf = self else {
@@ -353,11 +362,7 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        if let account = self.account, let action = BlahIdentitySignInHandoff.take(excluding: account.id) {
-            self.openIdentityList(action: action)
-        } else if !self.animatingIn {
-            self.controllerNode.activateInput()
-        }
+        if !self.animatingIn { self.controllerNode.activateInput() }
     }
     
     override public func viewWillDisappear(_ animated: Bool) {
@@ -400,20 +405,23 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
         return true
     }
     
-    private func openIdentityList(action: BlahIdentitySignInAction? = nil) {
+    private func openBlahAuthorization(action: BlahAuthorizationAction = .create) {
         guard let account = self.account else { return }
-        let identityController = blahIdentityController(network: account.network, sourceAccountId: account.id, sharedContext: self.sharedContext, presentationData: self.presentationData,
-            signIn: { [weak self] domain, failed in
+        let identityController = blahAuthorizationController(network: account.network, sharedContext: self.sharedContext, presentationData: self.presentationData,
+            action: action, signIn: { [weak self] domain in
                 guard let self else { return }
-                self.identitySignInFailed = failed
+                self.identitySignInFailed = { [weak self] error in
+                    guard let self else { return }
+                    presentBlahSignInError(error, sharedContext: self.sharedContext, from: self, signIn: { [weak self] email in
+                        self?.loginWithNumber?(email, false)
+                    })
+                }
                 self.loginWithNumber?(domain, false)
             }, cancelSignIn: { [weak self] in
                 self?.cancelIdentitySignIn?()
                 self?.identitySignInFailed = nil
                 self?.identityDeviceLinkDisposable.set(nil)
-            }, beginNewAuth: { [weak self] in
-                self?.sharedContext.beginNewAuth(testingEnvironment: account.testingEnvironment)
-            }, initialAction: action, completeDeviceLink: { [weak self] state, completed in
+            }, completeDeviceLink: { [weak self] state, completed in
                 guard let self else { return }
                 let signal: Signal<Void, BlahDeviceLinkError>
                 switch state {
@@ -429,15 +437,19 @@ public final class AuthorizationSequencePhoneEntryController: ViewController, MF
                     completed(error.localizedDescription)
                 }))
             })
-        (self.navigationController as? NavigationController)?.pushViewController(identityController)
+        (self.navigationController as? NavigationController)?.presentOverlay(controller: identityController)
     }
 
     @objc func nextPressed() {
         guard !self.inProgress, self.confirmationController == nil else {
             return
         }
-        if self.account != nil {
-            self.openIdentityList()
+        if let account = self.account {
+            if let node = self.displayNode as? BlahAuthorizationEntryNode, !node.homeConnected {
+                let controller = blahHomeController(network: account.network, sharedContext: self.sharedContext, presentationData: self.presentationData,
+                    completed: { [weak node] domain in node?.setHome(domain) })
+                (self.navigationController as? NavigationController)?.presentOverlay(controller: controller)
+            } else { self.openBlahAuthorization() }
             return
         }
         let (_, _, number) = self.controllerNode.codeAndNumber
