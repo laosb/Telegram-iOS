@@ -19,7 +19,10 @@ Create a hosted name or use a domain you host yourself. The app generates 24 BIP
 **recovery words**, shows them in the stock word grid, and verifies three before creating
 the account. These words encode the identity seed and are the only backup. Restoring words
 or an iCloud identity fetches the domain's profile, checks the derived identity and enrolls
-a new hardware device. Hosted publication is automatic; manual domains require uploading
+a new hardware device. Restoration discovers hosting at the first profile domain when it
+advertises apex hosting, otherwise at its parent when it serves child names. This also
+lets an operator restore and publish a DC identity through its own domain's hosting service.
+Hosted publication is automatic; manual domains require uploading
 the public `profile.cbor` at every listed HTTPS domain, including after signup numbering.
 Publication failures retain the exact signed revision for retry in **Settings → Blah Identity**.
 The stock signup name, admission-email and two-step password screens complete sign-in.

@@ -449,7 +449,7 @@ public actor BlahIdentityStore {
             // Keep at least one route through the selected host so publication remains
             // retryable; moving hosts is a separate custody workflow.
             if let host = current.record.hostingDomain,
-                !domains.contains(where: { $0.name.hasSuffix("." + host) && !$0.name.dropLast(host.count + 1).contains(".") }) {
+                !domains.contains(where: { $0.name == host || ($0.name.hasSuffix("." + host) && !$0.name.dropLast(host.count + 1).contains(".")) }) {
                 throw BlahIdentityError.invalidProfile
             }
             try await current.identity.update(current.identity.profile.content.replacingDomains(domains))
@@ -549,11 +549,26 @@ public actor BlahIdentityStore {
 
     private func hostingDomainForRestoration(_ profile: AnyBlahProfile, preferred: String?) async throws -> String? {
         if let preferred { return preferred }
-        let labels = profile.domains[0].name.split(separator: ".", maxSplits: 1)
+        let domain = profile.domains[0]
+        // Discover capabilities, regardless of profile kind: the domain itself may
+        // host its apex, while a parent must explicitly offer child names.
+        do {
+            let policy = try await ProfileHostingClient(domain: domain, http: BlahHostingHTTPClient()).policy()
+            if policy.apex { return domain.name }
+        } catch {
+            // Own-domain servers may reject hosting probes; only cancellation prevents parent discovery.
+            if error is CancellationError || (error as? ProfileHostingError) == .cancelled { throw error }
+        }
+        let labels = domain.name.split(separator: ".", maxSplits: 1)
         guard labels.count == 2 else { return nil }
         let host = String(labels[1])
-        do { _ = try await ProfileHostingClient(domain: DomainName(host), http: BlahHostingHTTPClient()).policy(); return host }
-        catch { if hostingUnavailable(error, policy: true) { return nil }; throw error }
+        do {
+            let policy = try await ProfileHostingClient(domain: DomainName(host), http: BlahHostingHTTPClient()).policy()
+            return policy.servesChildNames ? host : nil
+        } catch {
+            if hostingUnavailable(error, policy: true) { return nil }
+            throw error
+        }
     }
 
     public func recoveryWords(slot: String) async throws -> [String] {
@@ -1024,7 +1039,8 @@ extension BlahIdentityStore {
         guard labels.count == 2, let host = DomainName(normalizing: String(labels[1])) else { return nil }
         let client = ProfileHostingClient(domain: host, http: BlahHostingHTTPClient(detectUnsupportedHosting: true))
         do {
-            _ = try await client.policy()
+            let policy = try await client.policy()
+            guard policy.servesChildNames else { return nil }
         } catch {
             if hostingUnavailable(error, policy: true) { return nil }
             throw error
@@ -1160,8 +1176,11 @@ extension BlahIdentityStore {
             let fields = try CBOR(decoding: metadata).recordValue(requiredKeys: 0..<0)
             if let hosting = fields[7] {
                 let host = try hosting.recordValue(requiredKeys: 0..<3)[0]!.textValue()
-                let client = ProfileHostingClient(domain: try DomainName(host), http: BlahHostingHTTPClient())
-                guard !client.labels(in: opened.profile).isEmpty else { throw BlahIdentityError.invalidProfile }
+                let domain = try DomainName(host)
+                let client = ProfileHostingClient(domain: domain, http: BlahHostingHTTPClient())
+                guard opened.profile.domains.contains(domain) || !client.labels(in: opened.profile).isEmpty else {
+                    throw BlahIdentityError.invalidProfile
+                }
                 record.hostingDomain = host
             }
         }
