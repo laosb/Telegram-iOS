@@ -6,8 +6,8 @@ let package = Package(
     name: "TelegramDependencies",
     platforms: [.macOS(.v15), .iOS(.v18)],
     dependencies: [
-        .package(url: "https://github.com/UInt8Co/BlahDiem.git", revision: "f21f4a1ae35ddef437aab3ad9c16a58024f1d36f"),
-        .package(url: "https://github.com/UInt8Co/diem.git", revision: "f8da6ebc131649d5a4eb220fd3bb56bc5d3ae4d5"),
+        .package(url: "https://github.com/UInt8Co/BlahDiem.git", revision: "601501e8d431a3898daa22f5ba07ab265f06a9d1"),
+        .package(url: "https://github.com/UInt8Co/diem.git", revision: "55780087db25c771b97b7947a0419befe828ce80"),
     ],
     targets: [
         .testTarget(name: "BlahDiemPackageTests", dependencies: [
