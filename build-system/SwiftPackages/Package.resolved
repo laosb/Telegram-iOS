@@ -1,12 +1,12 @@
 {
-  "originHash" : "0e46c3ee3c2e609566d1164ace380477812ef25bc656e9f7f2aaa95cedc47fa9",
+  "originHash" : "f7857d3da62fcf74162229b50fcdc78b392367415b3ca9707332a7d23b44db25",
   "pins" : [
     {
       "identity" : "blahdiem",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/UInt8Co/BlahDiem.git",
       "state" : {
-        "revision" : "ab0297ce17280ae500944253d37d025ac9b2e23f"
+        "revision" : "f21f4a1ae35ddef437aab3ad9c16a58024f1d36f"
       }
     },
     {
@@ -14,7 +14,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/UInt8Co/diem.git",
       "state" : {
-        "revision" : "1b47c2eee6195b0fb91d0649e0206274abc34a28"
+        "revision" : "f8da6ebc131649d5a4eb220fd3bb56bc5d3ae4d5"
       }
     },
     {

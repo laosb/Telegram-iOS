@@ -5285,8 +5285,8 @@
           "REPO_MAPPING:rules_swift_package_manager+,bazel_skylib bazel_skylib+",
           "REPO_MAPPING:rules_swift_package_manager+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_swift_package_manager+,cgrindel_bazel_starlib cgrindel_bazel_starlib+",
-          "FILE:@@//build-system/SwiftPackages/Package.resolved 449a1f5ac9e141fdf2997620a6b55729361d41d2560aeea76e106515b0e29aab",
-          "FILE:@@//build-system/SwiftPackages/Package.swift 0e46c3ee3c2e609566d1164ace380477812ef25bc656e9f7f2aaa95cedc47fa9"
+          "FILE:@@//build-system/SwiftPackages/Package.resolved c47e4d1f9cd92b68bc55abf5425da46a2547d60bef0d74ad69310bfc5a59e934",
+          "FILE:@@//build-system/SwiftPackages/Package.swift f7857d3da62fcf74162229b50fcdc78b392367415b3ca9707332a7d23b44db25"
         ],
         "generatedRepoSpecs": {
           "swift_package": {
@@ -5300,7 +5300,7 @@
             "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
             "attributes": {
               "bazel_package_name": "swiftpkg_blahdiem",
-              "commit": "ab0297ce17280ae500944253d37d025ac9b2e23f",
+              "commit": "f21f4a1ae35ddef437aab3ad9c16a58024f1d36f",
               "remote": "https://github.com/UInt8Co/BlahDiem.git",
               "env": {},
               "env_inherit": [],
@@ -5315,7 +5315,7 @@
             "repoRuleId": "@@rules_swift_package_manager+//swiftpkg/internal:swift_package.bzl%swift_package",
             "attributes": {
               "bazel_package_name": "swiftpkg_diem",
-              "commit": "1b47c2eee6195b0fb91d0649e0206274abc34a28",
+              "commit": "f8da6ebc131649d5a4eb220fd3bb56bc5d3ae4d5",
               "remote": "https://github.com/UInt8Co/diem.git",
               "env": {},
               "env_inherit": [],
