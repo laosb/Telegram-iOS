@@ -689,19 +689,23 @@ public final class WalletWordsScreen: ViewControllerComponentContainer {
             self.isVerifying = true
             let wordsController: ViewController = self
             if let verification = self.verification {
-                let verificationController = verification { [weak self, weak wordsController] in
-                    guard let self, let wordsController else { return }
-                    self.isVerifying = false
-                    if let navigation = wordsController.navigationController as? NavigationController,
-                        let index = navigation.viewControllers.firstIndex(where: { $0 === wordsController }) {
+                let completion = self.completion
+                let navigation = self.navigationController as? NavigationController
+                weak var verificationController: ViewController?
+                let controller = verification { [weak self, weak wordsController, weak navigation] in
+                    self?.isVerifying = false
+                    // The words screen may already have been removed on background or lock.
+                    if let navigation,
+                        let index = navigation.viewControllers.firstIndex(where: { $0 === wordsController || $0 === verificationController }) {
                         navigation.setViewControllers(Array(navigation.viewControllers.prefix(upTo: index)), animated: false)
                     }
-                    self.completion?()
+                    completion?()
                 }
-                if let screen = verificationController as? ViewControllerComponentContainer {
+                verificationController = controller
+                if let screen = controller as? ViewControllerComponentContainer {
                     screen.wasDismissed = { [weak self] in self?.isVerifying = false }
                 }
-                self.push(verificationController)
+                self.push(controller)
                 return
             }
             guard let context = self.context else { self.isVerifying = false; return }
